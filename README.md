@@ -289,8 +289,8 @@ python scripts/backup.py D:\backup
 
 > `data/` 不要放在 OneDrive / 坚果云同步目录，文件锁会导致 SQLite 损坏。
 
-**Docker 实测**（2026-10-24）：镜像 `ms-lira:latest` 330 MB，构建约 100 秒；
-容器内验证通过采集入库（4 类事件）、LLM 归因、评论洞察、自然语言问数、文件收件箱与后台调度；
+**Docker 实测**（2026-10-25）：多阶段构建，镜像 `ms-lira:baseline` 约 548 MB，构建约 3 分钟；
+容器内验证通过健康检查、`/next` 静态前端、采集入库、Agent 研判与运行轨迹（LLM 关闭时走确定性回退）；
 `data/` 通过 bind mount 持久化，容器重建后数据仍在。
 
 > 模型连通性：Windows/macOS 的 Docker Desktop 可直接用 `host.docker.internal` 访问宿主机 Ollama。
@@ -581,6 +581,7 @@ LIRA_TEST_DB=postgres python -m pytest -q
 - 不做自动调价；holdout 已有，但样本量小时结论不可信
 - 单租户；上传按整文件读入内存（未做流式）
 - 旧版前端处于冻结状态；新功能只加在 `/next`
+- MCP SDK 锁定 1.x；升级 2.x 需要把 `FastMCP` 迁移到 `MCPServer`
 - 关键词召回按后端分流：SQLite 用 FTS5 trigram，PostgreSQL 用 pg_trgm + ILIKE
 - SSE 走进程内广播，只支持单进程；多 worker 需换 Redis pub/sub
 - 登录为独立页面 + 服务端守卫；角色化 UI 已在菜单与审批按钮生效，账号管理暂只有接口
