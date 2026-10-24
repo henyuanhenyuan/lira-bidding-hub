@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+
+# Runtime data
+data/
+_backups/
+_preview_data/
+*.db
+*.sqlite3
+*.log
+.env
+.env.*
+
+# Frontend
+web-next/node_modules/
+web-next/dist/
+
+# Local tooling
+.claude/settings.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

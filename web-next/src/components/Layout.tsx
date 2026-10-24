@@ -1,0 +1,129 @@
+import { NavLink, Outlet } from "react-router-dom";
+
+import { api } from "../api";
+import { useAuth } from "../auth";
+import { useAsync, useStreamBridge, useStreamEvent } from "../hooks";
+import { ROLE_TEXT } from "../labels";
+import type { Suggestion } from "../types";
+import Icon from "./Icon";
+
+interface NavItem {
+  to: string;
+  label: string;
+  icon: string;
+  end?: boolean;
+  adminOnly?: boolean;
+  staffOnly?: boolean;
+}
+
+const NAV: { group: string; items: NavItem[] }[] = [
+  { group: "工作台", items: [{ to: "/", label: "总览", icon: "overview", end: true }] },
+  {
+    group: "监控",
+    items: [
+      { to: "/events", label: "事件", icon: "events" },
+      { to: "/suggestions", label: "建议", icon: "suggestions" },
+      { to: "/approvals", label: "审批", icon: "approvals" },
+      { to: "/outcomes", label: "结果回收", icon: "outcome" },
+    ],
+  },
+  {
+    group: "洞察",
+    items: [
+      { to: "/competitors", label: "竞品", icon: "competitors" },
+      { to: "/cases", label: "案例", icon: "cases" },
+      { to: "/docs", label: "规则库", icon: "docs" },
+      { to: "/ask", label: "问数", icon: "ask" },
+      { to: "/agent", label: "Agent 轨迹", icon: "trace" },
+    ],
+  },
+  {
+    group: "配置",
+    items: [
+      { to: "/import", label: "数据导入", icon: "import" },
+      { to: "/skills", label: "Skill 管理", icon: "skills", staffOnly: true },
+      { to: "/eval", label: "评测", icon: "eval", staffOnly: true },
+      { to: "/collection", label: "采集健康", icon: "collection", adminOnly: true },
+      { to: "/admin", label: "账号", icon: "admin", adminOnly: true },
+    ],
+  },
+];
+
+export default function Layout() {
+  const { me, logout } = useAuth();
+  useStreamBridge();
+
+  const { data: approvals, reload } = useAsync(
+    () => api.get<Suggestion[]>("/api/approvals/inbox"),
+    [],
+  );
+  useStreamEvent(["approval"], () => void reload());
+
+  const role = me?.role ?? "member";
+  const name = me?.username || me?.actor || "local";
+  const pending = approvals?.length ?? 0;
+
+  return (
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <span className="brand-mark">竞</span>
+          <span className="brand-text">
+            <strong>竞品情报</strong>
+            <em>工作台 · 灰度版</em>
+          </span>
+        </div>
+
+        <nav className="nav">
+          {NAV.map((group) => {
+            const items = group.items.filter((item) => {
+              if (item.adminOnly) return role === "admin";
+              if (item.staffOnly) return role === "admin" || role === "manager";
+              return true;
+            });
+            if (!items.length) return null;
+            return (
+              <div className="nav-group" key={group.group}>
+                <span className="nav-label">{group.group}</span>
+                {items.map((item) => (
+                  <NavLink
+                    key={item.to}
+                    to={item.to}
+                    end={item.end}
+                    className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
+                  >
+                    <Icon name={item.icon} />
+                    <span className="nav-text">{item.label}</span>
+                    {item.to === "/approvals" && pending > 0 && (
+                      <span className="nav-badge">{pending}</span>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="sidebar-foot">
+          <div className="user">
+            <span className="avatar">{name.slice(0, 1).toUpperCase()}</span>
+            <span className="user-meta">
+              <b>{name}</b>
+              <em>{me?.auth ? ROLE_TEXT[role] ?? role : "本地模式"}</em>
+            </span>
+            <button className="icon-btn" onClick={() => void logout()} title="退出登录">
+              <Icon name="logout" size={16} />
+            </button>
+          </div>
+          <a className="old-link" href="/">
+            返回旧版界面
+          </a>
+        </div>
+      </aside>
+
+      <main className="content">
+        <Outlet />
+      </main>
+    </div>
+  );
+}

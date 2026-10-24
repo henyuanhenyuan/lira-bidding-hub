@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "lira",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8010"],
+      "port": 8010
+    },
+    {
+      "name": "lira-auth",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:LIRA_AUTH='on'; $env:LIRA_DATA_DIR='D:\\MS\\_preview_data'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8011"
+      ],
+      "port": 8011,
+      "url": "http://127.0.0.1:8011"
+    },
+    {
+      "name": "lira-next",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "$env:LIRA_AUTH='on'; $env:LIRA_DATABASE_URL='postgresql://lira:lira@127.0.0.1:5432/lira'; $env:LIRA_SCHEDULER='off'; python -m uvicorn app.main:app --host 127.0.0.1 --port 8013"
+      ],
+      "port": 8013,
+      "url": "http://127.0.0.1:8013"
+    }
+  ]
+}

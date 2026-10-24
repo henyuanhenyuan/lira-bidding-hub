@@ -1,0 +1,559 @@
+from __future__ import annotations
+
+import json
+import re
+import sqlite3
+import uuid
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from typing import Any, Iterator
+
+from .config import DATABASE_URL, DB_PATH, ensure_dirs
+
+BACKEND = "postgres" if DATABASE_URL else "sqlite"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS target (
+  id TEXT PRIMARY KEY,
+  platform TEXT NOT NULL DEFAULT 'taobao',
+  external_id TEXT,
+  title TEXT NOT NULL,
+  my_sku TEXT,
+  my_price REAL,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS snapshot (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  collector TEXT NOT NULL,
+  source_tier INTEGER NOT NULL,
+  payload TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  backfill INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_snapshot_dedup
+  ON snapshot(target_id, ts, collector, content_hash);
+CREATE INDEX IF NOT EXISTS ix_snapshot_target_ts ON snapshot(target_id, ts);
+
+CREATE TABLE IF NOT EXISTS price_point (
+  target_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  price_low REAL NOT NULL,
+  price_high REAL NOT NULL,
+  confidence REAL NOT NULL,
+  missing_fields TEXT NOT NULL DEFAULT '[]',
+  discontinuity INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (target_id, ts)
+);
+
+CREATE TABLE IF NOT EXISTS event (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  type TEXT NOT NULL,
+  severity TEXT NOT NULL,
+  gate_level TEXT NOT NULL,
+  suppressed INTEGER NOT NULL DEFAULT 0,
+  note TEXT,
+  evidence TEXT NOT NULL DEFAULT '[]',
+  rule_version TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_event_ts ON event(ts DESC);
+
+CREATE TABLE IF NOT EXISTS suggestion (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  impact_low REAL,
+  impact_high REAL,
+  confidence REAL NOT NULL,
+  gate_level TEXT NOT NULL,
+  narrative TEXT NOT NULL,
+  generated_by TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_suggestion_event ON suggestion(event_id);
+
+CREATE TABLE IF NOT EXISTS action_log (
+  id TEXT PRIMARY KEY,
+  suggestion_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  reason TEXT,
+  at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS "case" (
+  id TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  price_band TEXT NOT NULL,
+  delta_pct REAL,
+  summary TEXT NOT NULL,
+  attribution TEXT NOT NULL,
+  decision TEXT,
+  outcome_7d TEXT,
+  ts TEXT NOT NULL,
+  embed_provider TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  embedding BLOB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ingest_log (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  file_name TEXT,
+  rows_in INTEGER NOT NULL,
+  rows_ok INTEGER NOT NULL,
+  rows_dup INTEGER NOT NULL DEFAULT 0,
+  rows_rejected INTEGER NOT NULL,
+  errors TEXT NOT NULL DEFAULT '[]',
+  received_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS my_product (
+  sku TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  price REAL,
+  category TEXT,
+  image_url TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS mapping (
+  id TEXT PRIMARY KEY,
+  my_sku TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  score REAL,
+  method TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  decided_by TEXT,
+  UNIQUE (my_sku, target_id)
+);
+
+CREATE TABLE IF NOT EXISTS outcome (
+  id TEXT PRIMARY KEY,
+  suggestion_id TEXT NOT NULL UNIQUE,
+  result TEXT NOT NULL,
+  note TEXT,
+  sales_delta REAL,
+  recorded_by TEXT,
+  recorded_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS inbox_file (
+  name TEXT PRIMARY KEY,
+  content_hash TEXT,
+  status TEXT NOT NULL,
+  rows_ok INTEGER DEFAULT 0,
+  rows_dup INTEGER DEFAULT 0,
+  rows_rejected INTEGER DEFAULT 0,
+  error TEXT,
+  processed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS job_run (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  finished_at TEXT,
+  status TEXT NOT NULL,
+  detail TEXT
+);
+
+CREATE TABLE IF NOT EXISTS review (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  rating INTEGER,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (target_id, content_hash)
+);
+CREATE INDEX IF NOT EXISTS ix_review_target_ts ON review(target_id, ts);
+
+CREATE TABLE IF NOT EXISTS review_insight (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  window_days INTEGER NOT NULL,
+  generated_at TEXT NOT NULL,
+  review_count INTEGER NOT NULL,
+  topics TEXT NOT NULL,
+  opportunities TEXT NOT NULL,
+  summary TEXT,
+  generated_by TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_insight_target ON review_insight(target_id, generated_at);
+
+CREATE TABLE IF NOT EXISTS model_call (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  model TEXT NOT NULL,
+  ok INTEGER NOT NULL,
+  fallback INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_model_call_created ON model_call(created_at);
+
+CREATE TABLE IF NOT EXISTS approval_log (
+  id TEXT PRIMARY KEY,
+  suggestion_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT,
+  note TEXT,
+  at TEXT NOT NULL,
+  seq INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_approval_suggestion ON approval_log(suggestion_id);
+
+CREATE TABLE IF NOT EXISTS app_user (
+  username TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_run (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  suggestion_id TEXT,
+  trigger TEXT NOT NULL DEFAULT 'manual',
+  status TEXT NOT NULL,
+  model TEXT,
+  plan TEXT,
+  step_count INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER,
+  error TEXT,
+  started_at TEXT NOT NULL,
+  finished_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_agent_run_event ON agent_run(event_id);
+CREATE INDEX IF NOT EXISTS ix_agent_run_started ON agent_run(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS agent_step (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL,
+  input TEXT,
+  output TEXT,
+  latency_ms INTEGER,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_agent_step_run ON agent_step(run_id, seq);
+
+CREATE TABLE IF NOT EXISTS doc (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  source TEXT,
+  category TEXT,
+  version TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS doc_chunk (
+  id TEXT PRIMARY KEY,
+  doc_id TEXT NOT NULL,
+  chunk_no INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  embed_provider TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  embedding BLOB NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_doc_chunk_doc ON doc_chunk(doc_id, chunk_no);
+
+CREATE TABLE IF NOT EXISTS skill (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  event_types TEXT NOT NULL DEFAULT '[]',
+  min_severity TEXT,
+  playbook TEXT NOT NULL,
+  allowed_tools TEXT NOT NULL DEFAULT '[]',
+  version INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_case (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  expected_action TEXT NOT NULL,
+  expected_event_type TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS eval_run (
+  id TEXT PRIMARY KEY,
+  run_key TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  passed INTEGER NOT NULL,
+  accuracy REAL NOT NULL,
+  results TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_eval_run_created ON eval_run(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS execution (
+  id TEXT PRIMARY KEY,
+  suggestion_id TEXT NOT NULL,
+  mode TEXT NOT NULL,
+  status TEXT NOT NULL,
+  request TEXT,
+  response TEXT,
+  external_id TEXT,
+  idempotency_key TEXT NOT NULL UNIQUE,
+  actor TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL,
+  rolled_back_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_execution_suggestion ON execution(suggestion_id);
+
+CREATE TABLE IF NOT EXISTS outcome_reminder (
+  suggestion_id TEXT PRIMARY KEY,
+  last_sent_at TEXT NOT NULL
+);
+"""
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex
+
+
+_pool = None
+
+
+def _pg_pool():
+    global _pool
+    if _pool is None:
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+
+        _pool = ConnectionPool(
+            DATABASE_URL,
+            min_size=1,
+            max_size=10,
+            kwargs={"row_factory": dict_row},
+            open=True,
+        )
+    return _pool
+
+
+_DATETIME_LITERALS = (
+    (r"datetime\(\s*'now'\s*,\s*'-1 day'\s*\)", "(now() + interval '-1 day')"),
+    (r"datetime\(\s*'now'\s*,\s*'-7 days'\s*\)", "(now() + interval '-7 days')"),
+)
+
+
+def to_backend_sql(sql: str, *, bind: bool = True) -> str:
+    """把 SQLite 写法收敛成当前后端可执行的 SQL。
+
+    bind=True 时按 psycopg 的客户端绑定规则转义百分号，避免正文里的 `%` 被当成占位符。
+    """
+    if BACKEND != "postgres":
+        return sql
+    for pattern, repl in _DATETIME_LITERALS:
+        sql = re.sub(pattern, repl, sql)
+    sql = re.sub(r"datetime\(\s*'now'\s*,\s*\?\s*\)", "(now() + (?)::interval)", sql)
+    sql = re.sub(
+        r"datetime\(\s*([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*\)",
+        r"(\1)::timestamptz",
+        sql,
+    )
+    if bind:
+        sql = sql.replace("%", "%%")
+    return sql.replace("?", "%s")
+
+
+class _PgConnection:
+    def __init__(self, conn, pool):
+        self._conn = conn
+        self._pool = pool
+
+    def execute(self, sql: str, params=None):
+        if params is None:
+            return self._conn.execute(to_backend_sql(sql, bind=False))
+        return self._conn.execute(to_backend_sql(sql), params)
+
+    def executemany(self, sql: str, params_seq) -> None:
+        with self._conn.cursor() as cur:
+            cur.executemany(to_backend_sql(sql), params_seq)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def close(self) -> None:
+        self._pool.putconn(self._conn)
+
+
+def connect():
+    if BACKEND == "postgres":
+        pool = _pg_pool()
+        return _PgConnection(pool.getconn(), pool)
+    ensure_dirs()
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+@contextmanager
+def get_db() -> Iterator[Any]:
+    conn = connect()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _pg_schema() -> list[str]:
+    ddl = SCHEMA.replace("BLOB", "BYTEA").replace("REAL", "DOUBLE PRECISION")
+    ddl = ddl.replace(
+        "id INTEGER PRIMARY KEY AUTOINCREMENT",
+        "id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY",
+    )
+    return [part.strip() for part in ddl.split(";") if part.strip()]
+
+
+def init_db() -> None:
+    if BACKEND == "postgres":
+        _init_postgres()
+        return
+    with get_db() as conn:
+        conn.executescript(SCHEMA)
+        try:
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS case_fts USING fts5("
+                "id UNINDEXED, summary, attribution, tokenize='trigram')"
+            )
+        except sqlite3.OperationalError:
+            conn.execute(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS case_fts USING fts5("
+                "id UNINDEXED, summary, attribution)"
+            )
+        _ensure_all_columns(conn)
+
+
+def _init_postgres() -> None:
+    with get_db() as conn:
+        for statement in _pg_schema():
+            conn.execute(statement)
+        _ensure_all_columns(conn)
+    try:
+        with get_db() as conn:
+            conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            conn.execute(
+                'CREATE INDEX IF NOT EXISTS ix_case_trgm ON "case"'
+                " USING gin ((summary || ' ' || attribution) gin_trgm_ops)"
+            )
+    except Exception:
+        # 没有扩展权限时退化为顺序扫描，不影响结果正确性
+        pass
+
+
+def _ensure_all_columns(conn) -> None:
+    _ensure_column(conn, "suggestion", "case_ids", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "suggestion", "actor", "TEXT")
+    _ensure_column(conn, "event", "snapshot_id", "TEXT")
+    _ensure_column(conn, "target", "mapping_status", "TEXT DEFAULT 'unmapped'")
+    _ensure_column(conn, "target", "holdout", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "snapshot", "image_fingerprint", "TEXT")
+    _ensure_column(conn, "snapshot", "screenshot_ref", "TEXT")
+    # 毛利护栏
+    _ensure_column(conn, "my_product", "cost", "REAL")
+    _ensure_column(conn, "my_product", "margin_floor", "REAL DEFAULT 0.15")
+    _ensure_column(conn, "suggestion", "target_price", "REAL")
+    _ensure_column(conn, "suggestion", "margin_at_target", "REAL")
+    _ensure_column(conn, "suggestion", "margin_floor", "REAL")
+    _ensure_column(conn, "suggestion", "guardrail", "TEXT DEFAULT 'unknown'")
+    _ensure_column(conn, "suggestion", "guardrail_note", "TEXT")
+    _ensure_column(conn, "suggestion", "executed_price", "REAL")
+    _ensure_column(conn, "suggestion", "submitted_by", "TEXT")
+    _ensure_column(conn, "suggestion", "approved_by", "TEXT")
+    _ensure_column(conn, "approval_log", "seq", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "suggestion", "agent_run_id", "TEXT")
+    _ensure_column(conn, "agent_run", "skill_id", "TEXT")
+    _ensure_column(conn, "suggestion", "executed_at", "TEXT")
+    _ensure_column(conn, "suggestion", "execution_id", "TEXT")
+    _ensure_column(conn, "model_call", "run_id", "TEXT")
+    _ensure_column(conn, "model_call", "prompt_tokens", "INTEGER")
+    _ensure_column(conn, "model_call", "completion_tokens", "INTEGER")
+    _ensure_column(conn, "model_call", "cost", "REAL")
+    _ensure_column(conn, "agent_run", "prompt_tokens", "INTEGER")
+    _ensure_column(conn, "agent_run", "completion_tokens", "INTEGER")
+    _ensure_column(conn, "agent_run", "cost", "REAL")
+
+
+def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
+    if BACKEND == "postgres":
+        conn.execute(
+            f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS {column} '
+            f'{ddl.replace("REAL", "DOUBLE PRECISION")}'
+        )
+        return
+    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
+    if column not in cols:
+        conn.execute(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}')
+
+
+def row_to_dict(row) -> dict[str, Any]:
+    return {k: row[k] for k in row.keys()}
+
+
+def is_unique_violation(exc: Exception) -> bool:
+    if BACKEND == "postgres":
+        try:
+            import psycopg
+        except ImportError:
+            return False
+        return isinstance(exc, psycopg.errors.UniqueViolation)
+    return isinstance(exc, sqlite3.IntegrityError)
+
+
+def is_db_error(exc: Exception) -> bool:
+    if BACKEND == "postgres":
+        try:
+            import psycopg
+        except ImportError:
+            return False
+        return isinstance(exc, psycopg.Error)
+    return isinstance(exc, sqlite3.Error)
+
+
+def loads(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return default

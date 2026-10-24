@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lira
+      POSTGRES_PASSWORD: lira
+      POSTGRES_DB: lira
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lira -d lira"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  lira:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8010:8010"
+    environment:
+      LIRA_DATA_DIR: /data
+      LIRA_DATABASE_URL: postgresql://lira:lira@db:5432/lira
+      # 宿主机上的 Ollama；不可用时自动走模板
+      LIRA_OLLAMA_URL: http://host.docker.internal:11434
+      LIRA_OLLAMA_MODEL: qwen3:4b
+      LIRA_AUTH: "off"
+      LIRA_SCHEDULER: "on"
+      LIRA_DIGEST_AT: "09:00"
+      # LIRA_INGEST_TOKEN: change-me
+      # LIRA_WEBHOOK: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

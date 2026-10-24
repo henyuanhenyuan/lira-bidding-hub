@@ -1,0 +1,6 @@
+target_id,ts,collector,source_tier,list_price,coupons,promotions,coin_rate,coin_cap,member_price,live_price,account_tier,title
+t1,2026-10-23T02:17:00+08:00,yd-v1,3,299,[],[],0,0,,,normal,竞品A·洗护套装
+t1,2026-10-24T02:17:00+08:00,yd-v1,3,299,"[{""kind"":""shop"",""threshold"":299,""discount"":30}]",[],0,0,,,normal,竞品A·洗护套装
+t2,2026-10-23T02:17:00+08:00,yd-v1,3,199,[],[],0,0,,,normal,竞品B·控油洗发水
+t2,2026-10-24T02:17:00+08:00,yd-v1,3,149,[],[],0,0,,,normal,竞品B·控油洗发水
+t3,2026-10-24T02:17:00+08:00,yd-v1,3,,,,0,0,,,normal,竞品C·抓取失败示例

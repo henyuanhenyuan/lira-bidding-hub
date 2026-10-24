@@ -1,0 +1,8 @@
+data
+_backups
+__pycache__
+.pytest_cache
+*.pyc
+.git
+web-next/node_modules
+web-next/dist
