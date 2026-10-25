@@ -1,12 +1,71 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../api";
 import { useAuth } from "../auth";
+import PriceChart from "../components/PriceChart";
 import { Card, Empty, ErrorBox, Loader, Metric, PageHead, SeverityBadge } from "../components/ui";
 import { timeAgo } from "../format";
 import { useAsync, useStreamEvent } from "../hooks";
 import { ACTION_TEXT, TYPE_TEXT } from "../labels";
-import type { CollectionHealth, EventItem, Health, OpsState, Suggestion } from "../types";
+import type {
+  CollectionHealth,
+  EventItem,
+  Health,
+  OpsState,
+  PricePoint,
+  Suggestion,
+  Target,
+} from "../types";
+
+function PriceTrend() {
+  const targets = useAsync(() => api.get<Target[]>("/api/targets"), []);
+  const [targetId, setTargetId] = useState("");
+
+  useEffect(() => {
+    if (!targetId && targets.data?.length) {
+      setTargetId(targets.data[0].id);
+    }
+  }, [targets.data, targetId]);
+
+  const series = useAsync(
+    () =>
+      targetId
+        ? api.get<PricePoint[]>(`/api/targets/${targetId}/prices?limit=60`)
+        : Promise.resolve([]),
+    [targetId],
+  );
+
+  const current = targets.data?.find((item) => item.id === targetId);
+  const list = series.data ?? [];
+
+  return (
+    <Card
+      title="价格趋势"
+      sub="到手价区间；虚线是我方价格"
+      actions={
+        <select
+          value={targetId}
+          onChange={(event) => setTargetId(event.target.value)}
+        >
+          {(targets.data ?? []).map((target) => (
+            <option key={target.id} value={target.id}>
+              {target.title}
+            </option>
+          ))}
+        </select>
+      }
+    >
+      {series.error ? (
+        <ErrorBox message={series.error} onRetry={series.reload} />
+      ) : list.length === 0 ? (
+        <Empty>还没有价格序列。导入两次采集后即可看到趋势。</Empty>
+      ) : (
+        <PriceChart points={list} myPrice={current?.my_price ?? null} />
+      )}
+    </Card>
+  );
+}
 
 export default function Overview() {
   const { me } = useAuth();
@@ -77,6 +136,8 @@ export default function Overview() {
           tone={stale ? "warn" : "ok"}
         />
       </div>
+
+      <PriceTrend />
 
       <div className="grid-2">
         <Card

@@ -8,6 +8,7 @@ import AgentTrace from "./pages/AgentTrace";
 import Approvals from "./pages/Approvals";
 import Ask from "./pages/Ask";
 import Cases from "./pages/Cases";
+import CollectLogs from "./pages/CollectLogs";
 import Collection from "./pages/Collection";
 import CompetitorDetail from "./pages/CompetitorDetail";
 import Competitors from "./pages/Competitors";
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="skills" element={<Skills />} />
           <Route path="eval" element={<EvalPage />} />
           <Route path="collection" element={<Collection />} />
+          <Route path="collect-logs" element={<CollectLogs />} />
           <Route path="import" element={<ImportPage />} />
           <Route path="admin" element={<Admin />} />
           <Route path="*" element={<NotFound />} />

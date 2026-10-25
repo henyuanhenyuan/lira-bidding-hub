@@ -492,6 +492,21 @@ p {
   color: #0369a1;
 }
 
+.status-running {
+  background: #eef7ff;
+  color: #0369a1;
+}
+
+.status-done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.status-failed {
+  background: #fdecec;
+  color: #b91c1c;
+}
+
 .guard-ok {
   background: var(--ok-soft);
   color: var(--ok);
@@ -737,6 +752,17 @@ p {
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  align-self: end;
+}
+
+.hint.danger {
+  color: #b91c1c;
 }
 
 /* ---------- tables ---------- */

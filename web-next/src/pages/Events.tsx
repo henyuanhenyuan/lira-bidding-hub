@@ -15,14 +15,37 @@ const FILTERS = [
   { value: "L1", label: "L1 信息" },
 ];
 
+const TYPE_GROUPS: { key: string; label: string; types: string[] }[] = [
+  { key: "", label: "全部类型", types: [] },
+  {
+    key: "price",
+    label: "价格变动",
+    types: ["price_drop", "price_rise", "band_breach"],
+  },
+  {
+    key: "content",
+    label: "标题与主图",
+    types: ["title_change", "image_change"],
+  },
+  { key: "review", label: "差评突增", types: ["review_spike"] },
+  { key: "source", label: "采集源切换", types: ["source_switch"] },
+];
+
 export default function Events() {
   const [severity, setSeverity] = useState("");
+  const [group, setGroup] = useState("");
   const { data, error, loading, reload } = useAsync(
     () => api.get<EventItem[]>(`/api/events${query({ severity, limit: 100 })}`),
     [severity],
   );
 
   useStreamEvent(["event", "ingest"], () => void reload());
+
+  const activeGroup = TYPE_GROUPS.find((item) => item.key === group);
+  const events = (data ?? []).filter(
+    (event) =>
+      !activeGroup?.types.length || activeGroup.types.includes(event.type),
+  );
 
   return (
     <>
@@ -49,17 +72,31 @@ export default function Events() {
           ))}
         </div>
         <span className="hint">
-          {loading ? "刷新中…" : `${data?.length ?? 0} 条事件`}
+          {loading ? "刷新中…" : `${events.length} 条事件`}
         </span>
+      </div>
+
+      <div className="toolbar">
+        <div className="chips">
+          {TYPE_GROUPS.map((item) => (
+            <button
+              key={item.key}
+              className={`chip${group === item.key ? " active" : ""}`}
+              onClick={() => setGroup(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && <ErrorBox message={error} onRetry={reload} />}
       {loading && !data && <Loader />}
-      {data && data.length === 0 && (
-        <Empty>当前筛选下没有事件。换个级别，或先导入采集数据。</Empty>
+      {events.length === 0 && (
+        <Empty>当前筛选下没有事件。换个级别或类型，或先导入采集数据。</Empty>
       )}
 
-      {data && data.length > 0 && (
+      {events.length > 0 && (
         <div className="table-wrap card">
           <table className="table hoverable">
             <thead>
@@ -72,7 +109,7 @@ export default function Events() {
               </tr>
             </thead>
             <tbody>
-              {data.map((event) => (
+              {events.map((event) => (
                 <tr key={event.id}>
                   <td>
                     <SeverityBadge value={event.severity} />

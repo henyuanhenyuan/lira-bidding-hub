@@ -47,6 +47,9 @@ export const api = {
       body: JSON.stringify(body),
     }).then((r) => handle<T>(r));
   },
+  delete<T>(path: string): Promise<T> {
+    return fetch(path, { method: "DELETE" }).then((r) => handle<T>(r));
+  },
   upload<T>(path: string, file: File): Promise<T> {
     const form = new FormData();
     form.append("file", file);

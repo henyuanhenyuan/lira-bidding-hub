@@ -17,33 +17,39 @@ interface NavItem {
 }
 
 const NAV: { group: string; items: NavItem[] }[] = [
-  { group: "工作台", items: [{ to: "/", label: "总览", icon: "overview", end: true }] },
   {
-    group: "监控",
+    group: "监控任务管理",
     items: [
-      { to: "/events", label: "事件", icon: "events" },
-      { to: "/suggestions", label: "建议", icon: "suggestions" },
+      { to: "/collection", label: "任务配置", icon: "collection", adminOnly: true },
+      { to: "/import", label: "数据导入", icon: "import" },
+    ],
+  },
+  {
+    group: "数据看板",
+    items: [
+      { to: "/", label: "总览", icon: "overview", end: true },
+      { to: "/competitors", label: "竞品 360", icon: "competitors" },
+      { to: "/cases", label: "案例库", icon: "cases" },
+    ],
+  },
+  {
+    group: "预警中心",
+    items: [
+      { to: "/events", label: "预警事件", icon: "events" },
+      { to: "/suggestions", label: "处置建议", icon: "suggestions" },
       { to: "/approvals", label: "审批", icon: "approvals" },
       { to: "/outcomes", label: "结果回收", icon: "outcome" },
     ],
   },
   {
-    group: "洞察",
+    group: "系统设置",
     items: [
-      { to: "/competitors", label: "竞品", icon: "competitors" },
-      { to: "/cases", label: "案例", icon: "cases" },
+      { to: "/collect-logs", label: "采集日志", icon: "trace", adminOnly: true },
+      { to: "/agent", label: "Agent 轨迹", icon: "trace" },
       { to: "/docs", label: "规则库", icon: "docs" },
       { to: "/ask", label: "问数", icon: "ask" },
-      { to: "/agent", label: "Agent 轨迹", icon: "trace" },
-    ],
-  },
-  {
-    group: "配置",
-    items: [
-      { to: "/import", label: "数据导入", icon: "import" },
       { to: "/skills", label: "Skill 管理", icon: "skills", staffOnly: true },
       { to: "/eval", label: "评测", icon: "eval", staffOnly: true },
-      { to: "/collection", label: "采集健康", icon: "collection", adminOnly: true },
       { to: "/admin", label: "账号", icon: "admin", adminOnly: true },
     ],
   },

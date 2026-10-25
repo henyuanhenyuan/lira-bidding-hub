@@ -1,3 +1,5 @@
+import { type FormEvent, useState } from "react";
+
 import { api } from "../api";
 import { useAuth } from "../auth";
 import {
@@ -11,33 +13,81 @@ import {
 } from "../components/ui";
 import { formatTs, timeAgo } from "../format";
 import { useAsync, useStreamEvent } from "../hooks";
-import type { OpsState } from "../types";
+import { CHANNEL_TEXT, COLLECT_STATUS_TEXT } from "../labels";
+import type { CollectTask, OpsState, Target } from "../types";
+
+const CHANNELS: CollectTask["channel"][] = ["rpa", "api", "manual"];
+const EMPTY_TASKS: CollectTask[] = [];
 
 export default function Collection() {
   const { me } = useAuth();
   const isAdmin = me?.role === "admin";
-  const { data, error, loading, reload } = useAsync(
-    () => (isAdmin ? api.get<OpsState>("/api/ops") : Promise.resolve(null)),
-    [isAdmin],
-  );
+
+  const [targetId, setTargetId] = useState("");
+  const [channel, setChannel] = useState<CollectTask["channel"]>("rpa");
+  const [intervalMin, setIntervalMin] = useState(60);
+  const [priority, setPriority] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const { data, error, loading, reload } = useAsync(async () => {
+    if (!isAdmin) return null;
+    const [ops, taskList, targets] = await Promise.all([
+      api.get<OpsState>("/api/ops"),
+      api.get<{ tasks: CollectTask[] }>("/api/collect/tasks"),
+      api.get<Target[]>("/api/targets"),
+    ]);
+    return { ops, tasks: taskList.tasks ?? EMPTY_TASKS, targets };
+  }, [isAdmin]);
 
   useStreamEvent(["ingest", "event"], () => void reload());
 
   if (!isAdmin) {
     return (
       <>
-        <PageHead title="采集健康" sub="仅管理员可见" />
-        <Empty>当前账号没有查看系统与采集详情的权限。</Empty>
+        <PageHead title="监控任务管理" sub="仅管理员可见" />
+        <Empty>当前账号没有配置采集任务的权限。</Empty>
       </>
     );
   }
 
-  if (loading && !data) return <Loader label="载入系统状态…" />;
+  if (loading && !data) return <Loader label="载入采集状态…" />;
   if (error && !data) return <ErrorBox message={error} onRetry={reload} />;
   if (!data) return null;
 
-  const { collection, freshness, inbox, scheduler, metrics, backups, connector } = data;
+  const { ops, tasks, targets } = data;
+  const { collection, freshness, inbox, scheduler, metrics, backups, connector } = ops;
   const stale = collection.filter((item) => item.stale).length;
+  const titleOf = (id: string) =>
+    targets.find((item) => item.id === id)?.title ?? id;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!targetId) {
+      setFormError("先选择一个竞品目标");
+      return;
+    }
+    setBusy(true);
+    setFormError(null);
+    try {
+      await api.post("/api/collect/tasks", {
+        target_id: targetId,
+        channel,
+        interval_s: Math.max(0, Math.round(intervalMin * 60)),
+        priority,
+      });
+      await reload();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "创建失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(taskId: string) {
+    await api.delete(`/api/collect/tasks/${taskId}`);
+    await reload();
+  }
 
   async function scan() {
     await api.post("/api/ops/inbox-scan");
@@ -47,8 +97,8 @@ export default function Collection() {
   return (
     <>
       <PageHead
-        title="采集健康"
-        sub="数据新不新、RPA 有没有断、失败文件在哪里"
+        title="监控任务管理"
+        sub="配置采什么、多久采一次，以及采集是否正常"
         actions={
           <>
             <button className="btn ghost" onClick={() => void scan()}>
@@ -69,6 +119,12 @@ export default function Collection() {
           tone={freshness.stale ? "danger" : "ok"}
         />
         <Metric
+          label="监控任务"
+          value={tasks.filter((task) => task.status !== "cancelled").length}
+          sub={`${tasks.filter((task) => task.status === "failed").length} 个失败`}
+          tone={tasks.some((task) => task.status === "failed") ? "warn" : "ok"}
+        />
+        <Metric
           label="采集源"
           value={collection.length}
           sub={stale ? `${stale} 个滞后` : "全部正常"}
@@ -87,19 +143,127 @@ export default function Collection() {
             metrics.p95_latency_ms ?? "—"
           }ms`}
         />
-        <Metric
-          label="Token / 成本 · 24h"
-          value={metrics.tokens ?? 0}
-          sub={`¥${(metrics.cost ?? 0).toFixed(4)}${
-            metrics.daily_budget_tokens
-              ? ` · 预算 ${metrics.daily_budget_tokens}`
-              : " · 未设预算"
-          }`}
-          tone={(metrics.budget_used_ratio ?? 0) >= 1 ? "danger" : ""}
-        />
       </div>
 
-      <Card title="采集源" sub="超时会在事件页与总览标红">
+      <Card title="新建监控任务" sub="选目标、选通道、定频率；频率为 0 表示只跑一次">
+        <form className="form-grid" onSubmit={submit}>
+          <label>
+            <span>竞品目标</span>
+            <select
+              value={targetId}
+              onChange={(event) => setTargetId(event.target.value)}
+            >
+              <option value="">请选择</option>
+              {targets.map((target) => (
+                <option key={target.id} value={target.id}>
+                  {target.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>采集通道</span>
+            <select
+              value={channel}
+              onChange={(event) =>
+                setChannel(event.target.value as CollectTask["channel"])
+              }
+            >
+              {CHANNELS.map((item) => (
+                <option key={item} value={item}>
+                  {CHANNEL_TEXT[item]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>频率（分钟）</span>
+            <input
+              type="number"
+              min={0}
+              step={5}
+              value={intervalMin}
+              onChange={(event) => setIntervalMin(Number(event.target.value))}
+            />
+          </label>
+          <label>
+            <span>优先级</span>
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={priority}
+              onChange={(event) => setPriority(Number(event.target.value))}
+            />
+          </label>
+          <div className="form-actions">
+            <button className="btn" type="submit" disabled={busy}>
+              {busy ? "创建中…" : "创建任务"}
+            </button>
+            {formError && <span className="hint danger">{formError}</span>}
+          </div>
+        </form>
+      </Card>
+
+      <Card title="任务列表" sub="停止后不再下发，历史仍可在采集日志里查">
+        {tasks.length === 0 ? (
+          <Empty>还没有采集任务。选一个竞品目标创建第一条。</Empty>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>目标</th>
+                  <th>通道</th>
+                  <th>频率</th>
+                  <th>状态</th>
+                  <th>下次运行</th>
+                  <th>尝试</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tasks.map((task) => (
+                  <tr key={task.id}>
+                    <td>{titleOf(task.target_id)}</td>
+                    <td>{CHANNEL_TEXT[task.channel] ?? task.channel}</td>
+                    <td className="num">
+                      {task.interval_s > 0
+                        ? `${Math.round(task.interval_s / 60)} 分钟`
+                        : "单次"}
+                    </td>
+                    <td>
+                      <span className={`badge status-${task.status}`}>
+                        {COLLECT_STATUS_TEXT[task.status] ?? task.status}
+                      </span>
+                    </td>
+                    <td className="num">
+                      {task.next_run_at ? formatTs(task.next_run_at, true) : "—"}
+                    </td>
+                    <td className="num">
+                      {task.attempts}/{task.max_attempts}
+                    </td>
+                    <td>
+                      {task.status === "cancelled" ? (
+                        <span className="hint">已停止</span>
+                      ) : (
+                        <button
+                          className="btn ghost small"
+                          onClick={() => void cancel(task.id)}
+                        >
+                          停止
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="采集源健康度" sub="超时会在事件页与总览标红">
         {collection.length === 0 ? (
           <Empty>还没有采集记录。</Empty>
         ) : (
@@ -157,11 +321,14 @@ export default function Collection() {
         <Card title="运行状态">
           <KV
             rows={[
-              ["后台调度", scheduler.enabled ? "运行中" : "已关闭"],
+              [
+                "后台调度",
+                scheduler.enabled ? `运行中 · ${scheduler.mode ?? "celery"}` : "已关闭",
+              ],
               ["启动时间", scheduler.started_at ? formatTs(scheduler.started_at) : "—"],
               ["三方连接器", connector.configured ? "已配置" : "未配置"],
-              ["消息推送", data.webhook ? "已配置" : "未配置"],
-              ["登录鉴权", data.auth_enabled ? "已启用" : "未启用"],
+              ["消息推送", ops.webhook ? "已配置" : "未配置"],
+              ["登录鉴权", ops.auth_enabled ? "已启用" : "未启用"],
               ["备份", backups[0] || "暂无"],
             ]}
           />

@@ -54,11 +54,35 @@ export const STEP_KIND_TEXT: Record<string, string> = {
   context: "上下文",
   plan: "计划",
   tool: "工具",
+  steward: "采集门禁",
   analysis: "归因",
+  risk: "风险",
   verify: "校验",
+  writer: "成文",
   critic: "复核",
   fallback: "回退",
   suggestion: "建议",
   finalize: "完成",
   error: "错误",
+};
+
+export const CHANNEL_TEXT: Record<string, string> = {
+  api: "官方 API",
+  rpa: "影刀 RPA",
+  manual: "人工文件",
+};
+
+export const COLLECT_STATUS_TEXT: Record<string, string> = {
+  pending: "待下发",
+  running: "下发中",
+  done: "已完成",
+  failed: "失败",
+  cancelled: "已停止",
+};
+
+export const OUTCOME_TEXT: Record<string, string> = {
+  done: "成功",
+  pending: "已下发",
+  skipped: "跳过",
+  error: "失败",
 };

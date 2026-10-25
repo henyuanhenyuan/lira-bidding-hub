@@ -263,10 +263,69 @@ export interface Skill {
   min_severity: string;
   playbook: string;
   allowed_tools: string[];
+  stages?: string[];
+  output_schema?: Record<string, unknown> | null;
   version: number;
   enabled: number;
   created_at: string;
   updated_at: string;
+}
+
+export type CollectChannel = "api" | "rpa" | "manual";
+export type CollectTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled";
+
+export interface CollectTask {
+  id: string;
+  target_id: string;
+  channel: CollectChannel;
+  status: CollectTaskStatus;
+  priority: number;
+  attempts: number;
+  max_attempts: number;
+  interval_s: number;
+  next_run_at: string | null;
+  locked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+  target_title?: string | null;
+}
+
+export interface CollectLog {
+  id: number;
+  ts: string;
+  task_id: string | null;
+  channel: string;
+  account: string | null;
+  shop: string | null;
+  status_code: number | null;
+  latency_ms: number | null;
+  outcome: string;
+  error_kind: string | null;
+  detail: string | null;
+}
+
+export interface CollectSummary {
+  hours: number;
+  outcomes: Record<string, number>;
+  errors: Record<string, number>;
+}
+
+export interface ManualReview {
+  id: string;
+  task_id: string;
+  channel: string;
+  target_id: string | null;
+  reason: string;
+  status: string;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
 }
 
 export interface EvalCase {
@@ -393,6 +452,7 @@ export interface JobRun {
 export interface OpsState {
   scheduler: {
     enabled: boolean;
+    mode?: string;
     started_at?: string;
     recent: JobRun[];
     last?: Record<string, string>;
