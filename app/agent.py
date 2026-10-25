@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import config, evidence, metrics
+from . import assertions, config, evidence, metrics
 from .contracts import PricePoint
 
 log = logging.getLogger(__name__)
@@ -249,6 +249,19 @@ def _call_llm(
         )
         return None
 
+    violations = assertions.verify(
+        str(data.get("narrative", "")),
+        allowed=assertions.facts_to_numbers(facts),
+    )
+    if violations:
+        log.warning("numeric assertion rejected: %s", [v.raw for v in violations])
+        metrics.record(
+            "attribution", model=config.OLLAMA_MODEL, ok=False, fallback=True,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            detail=f"numeric rejected: {','.join(v.raw for v in violations)[:120]}",
+        )
+        return None
+
     conf = float(data.get("confidence", 0.5))
     conf = max(0.0, min(1.0, conf))
     conf = evidence.confidence_ceiling(len(check.valid), conf)
@@ -366,9 +379,15 @@ def analyze(
         "title": title,
         "price_low": point.price_low,
         "price_high": point.price_high,
+        "point": point.point,
         "confidence": point.confidence,
         "missing_fields": point.missing_fields,
         "prev_point": prev.point if prev else None,
+        "delta_pct": (
+            (point.point - prev.point) / prev.point
+            if prev and prev.point
+            else None
+        ),
         "prev_ts": prev.ts if prev else None,
         "similar_cases": [
             {
