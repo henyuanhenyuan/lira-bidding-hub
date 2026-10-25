@@ -70,6 +70,7 @@ ollama pull qwen3:4b
 | `LIRA_RERANK_URL` | 空 | 模型重排地址（TEI / Jina 兼容）；不设则走规则重排 |
 | `LIRA_RERANK_MODEL` | `bge-reranker-v2-m3` | 重排模型名 |
 | `LIRA_RERANK_TIMEOUT` | `5` | 重排超时（秒），超时自动降级 |
+| `LIRA_STEWARD_ENFORCE` | `off` | `on` 时采集过期会把 L3 降为 L2，并标注 `downgraded_by_freshness` |
 | `LIRA_INBOX_INTERVAL` | `15` | 收件箱轮询间隔（秒） |
 | `LIRA_DIGEST_AT` | `09:00` | 每日摘要触发时间（本地时区） |
 | `LIRA_WEBHOOK` | 空 | 企业微信/钉钉机器人地址 |
@@ -368,11 +369,20 @@ python scripts/backup.py D:\backup
 
 ## Agent 执行与轨迹
 
-一次研判由 LangGraph 状态机完成：
+一次研判由 LangGraph 状态机完成，按职责拆成四个 Agent：
 
 ```
-加载事件 → 生成计划 → 工具调用 → 归因 → 校验 → 写入建议 → 完成
+加载事件 → 生成计划 → 工具调用
+        → Steward  采集健康：数据过期时禁止 L3（LIRA_STEWARD_ENFORCE=on 才生效）
+        → Analyst  归因：只引用工具事实，证据闭包不通过整条作废
+        → Risk     毛利护栏与动作可行性
+        → 校验     证据 / 动作 / 置信度 / 叙事 / 门禁
+        → Writer   组装建议文案与影响区间
+        → 写入建议 → 完成
 ```
+
+路由是确定性的：默认全流水线，Skill 的 `stages` 可以裁掉 Steward，
+不做自由路由，避免模型决定流程。
 
 **工具层与 MCP 共用同一份契约**（[app/tools.py](app/tools.py)）：
 
@@ -410,7 +420,8 @@ python -m app.mcp_server
 
 ## Skill 注册表
 
-每个 Skill 决定：触发事件类型、最低级别、分析剧本、允许调用的工具白名单。
+每个 Skill 是声明式的，决定：触发事件类型、最低级别、分析剧本、允许调用的工具白名单、
+执行阶段（`stages`）与输出 schema（`output_schema`）。
 
 - 内置三个：大促价格试探、价格带击穿、评论异动
 - 命中 Skill 后，计划只保留白名单内的工具；没有命中则用「通用研判」
