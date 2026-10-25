@@ -17,6 +17,10 @@ def test_similarity_is_low_for_rewrite():
     assert semantic.similarity(a, b) < 0.4
 
 
+def test_whitespace_only_change_is_not_reported():
+    assert semantic.detect(obs("竞品A 洗发水 500ml"), obs("竞品A  洗发水 500ml")) == []
+
+
 def test_no_previous_observation_means_no_change():
     assert semantic.detect(None, obs()) == []
 

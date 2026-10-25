@@ -3,9 +3,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from . import images
+from . import embeddings, images
 
-RULE_VERSION = "semantic-v1"
+RULE_VERSION = "semantic-v2"
+L2_SIMILARITY = 0.60
 
 _SPLIT = re.compile(r"[·・|、,，/／;；:：()（）\[\]【】\s]+")
 
@@ -14,19 +15,16 @@ def normalize(text: str) -> str:
     return re.sub(r"\s+", "", (text or "").lower())
 
 
-def _bigrams(text: str) -> set[str]:
-    s = normalize(text)
-    if len(s) < 2:
-        return {s} if s else set()
-    return {s[i : i + 2] for i in range(len(s) - 1)}
-
-
 def similarity(a: str, b: str) -> float:
-    """字符二元组 Jaccard。标题短、中文无空格，比编辑距离更稳。"""
-    A, B = _bigrams(a), _bigrams(b)
-    if not A or not B:
+    """向量余弦。同一 embedding 提供方下比较，提供方不一致直接判为不同。"""
+    if normalize(a) == normalize(b):
+        return 1.0
+    va, provider_a = embeddings.embed(a)
+    vb, provider_b = embeddings.embed(b)
+    if provider_a != provider_b or len(va) != len(vb):
         return 0.0
-    return len(A & B) / len(A | B)
+    score = sum(x * y for x, y in zip(va, vb))
+    return max(0.0, min(1.0, score))
 
 
 def claims(title: str) -> set[str]:
@@ -55,10 +53,7 @@ def detect(prev: dict | None, cur: dict) -> list[Change]:
         pc, cc = claims(pt), claims(ct)
         added = sorted(cc - pc)
         removed = sorted(pc - cc)
-        if sim < 0.6:
-            sev = "L2"
-        else:
-            sev = "L1"
+        sev = "L2" if sim < L2_SIMILARITY else "L1"
 
         bits = []
         if added:

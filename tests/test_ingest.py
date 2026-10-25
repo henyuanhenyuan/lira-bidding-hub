@@ -1,4 +1,4 @@
-from app import db, ingest
+from app import db, ingest, semantic
 from app.contracts import Coin, Coupon, Observation, SnapshotIn
 
 D1 = "2026-10-23T02:17:00+08:00"
@@ -28,7 +28,7 @@ def test_title_change_emits_semantic_event():
         ).fetchone()
     assert row is not None
     assert "买一送一" in row["note"]
-    assert row["rule_version"] == "semantic-v1"
+    assert row["rule_version"] == semantic.RULE_VERSION
 
 
 def test_image_change_emits_semantic_event():
