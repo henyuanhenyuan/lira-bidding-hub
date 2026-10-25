@@ -34,6 +34,12 @@ def test_run_now_supports_backup():
     assert scheduler.run_now("backup")
 
 
+def test_worker_imports_task_module():
+    from app.celery_app import celery_app
+
+    assert "app.tasks" in (celery_app.conf.include or [])
+
+
 def test_beat_schedule_runs_collect_dispatch():
     from app.celery_app import celery_app
 

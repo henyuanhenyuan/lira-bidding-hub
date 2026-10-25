@@ -8,7 +8,12 @@ from celery.schedules import crontab
 BROKER_URL = os.getenv("LIRA_REDIS_URL", "redis://127.0.0.1:6379/0")
 EAGER = os.getenv("LIRA_CELERY_EAGER", "0").lower() in {"1", "true", "on"}
 
-celery_app = Celery("lira", broker=BROKER_URL, backend=BROKER_URL)
+celery_app = Celery(
+    "lira",
+    broker=BROKER_URL,
+    backend=BROKER_URL,
+    include=["app.tasks"],
+)
 celery_app.conf.update(
     task_always_eager=EAGER,
     task_eager_propagates=True,
