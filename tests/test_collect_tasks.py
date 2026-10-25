@@ -72,6 +72,35 @@ def test_unknown_channel_rejected():
             raise AssertionError("unknown channel accepted")
 
 
+def test_reschedule_returns_to_pending():
+    with db.get_db() as conn:
+        task_id = collect_tasks.create(
+            conn, target_id="t1", channel="rpa", interval_s=600
+        )
+        collect_tasks.claim(conn, channel="rpa")
+        collect_tasks.reschedule(conn, task_id, interval_s=600)
+        row = collect_tasks.get(conn, task_id)
+    assert row["status"] == "pending"
+    assert row["attempts"] == 0
+    assert row["next_run_at"] is not None
+
+
+def test_cancel_removes_from_claimable():
+    with db.get_db() as conn:
+        task_id = collect_tasks.create(conn, target_id="t1", channel="rpa")
+        assert collect_tasks.cancel(conn, task_id) is True
+        assert collect_tasks.get(conn, task_id)["status"] == "cancelled"
+        assert collect_tasks.claim(conn, channel="rpa") == []
+
+
+def test_list_tasks_filters_channel():
+    with db.get_db() as conn:
+        collect_tasks.create(conn, target_id="t1", channel="rpa")
+        collect_tasks.create(conn, target_id="t2", channel="api")
+        assert len(collect_tasks.list_tasks(conn, channel="rpa")) == 1
+        assert len(collect_tasks.list_tasks(conn)) == 2
+
+
 def test_counts_by_status():
     with db.get_db() as conn:
         collect_tasks.create(conn, target_id="t1", channel="rpa")

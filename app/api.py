@@ -9,7 +9,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import (
-    agent, agent_graph, alignment, approval, auth, collect_logs, collectors,
+    agent, agent_graph, alignment, approval, auth, collect_logs, collect_tasks,
+    collectors,
     config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
     executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
     review_queue, reviews as review_store, scheduler, skills, stream,
@@ -1157,6 +1158,52 @@ def ops_inbox_scan(
 
 
 # ---------------- 采集运维 ----------------
+
+class CollectTaskIn(BaseModel):
+    target_id: str
+    channel: str = "rpa"
+    interval_s: int = 0
+    priority: int = 0
+    max_attempts: int = 3
+
+
+@router.get("/api/collect/tasks")
+def collect_task_list(
+    channel: str | None = None,
+    limit: int = 200,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        return {"tasks": collect_tasks.list_tasks(conn, channel=channel, limit=limit)}
+
+
+@router.post("/api/collect/tasks")
+def collect_task_create(
+    body: CollectTaskIn,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        try:
+            task_id = collect_tasks.create(
+                conn, target_id=body.target_id, channel=body.channel,
+                priority=body.priority, max_attempts=body.max_attempts,
+                interval_s=body.interval_s,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return collect_tasks.get(conn, task_id)
+
+
+@router.delete("/api/collect/tasks/{task_id}")
+def collect_task_cancel(
+    task_id: str,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        if not collect_tasks.cancel(conn, task_id):
+            raise HTTPException(404, "task not found")
+    return {"id": task_id, "status": "cancelled"}
+
 
 @router.get("/api/collect/logs")
 def collect_log_list(

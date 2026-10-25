@@ -71,6 +71,21 @@ def test_skipped_dispatch_reschedules():
     assert row["next_run_at"] is not None
 
 
+def test_recurring_task_is_rescheduled():
+    with db.get_db() as conn:
+        task_id = collect_tasks.create(
+            conn, target_id="t1", channel="rpa", interval_s=600
+        )
+    adapter = FakeAdapter(DispatchResult("pending", external_ref="t1.json"))
+    collector.dispatch_due(
+        "rpa", adapter=adapter, rl_client=_client(), risk_client=_client()
+    )
+    with db.get_db() as conn:
+        row = collect_tasks.get(conn, task_id)
+    assert row["status"] == "pending"
+    assert row["next_run_at"] is not None
+
+
 def test_open_circuit_blocks_and_enqueues_review():
     from app import risk
 

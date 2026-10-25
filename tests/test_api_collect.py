@@ -60,6 +60,30 @@ def test_review_bad_decision_returns_400():
     assert response.status_code == 400
 
 
+def test_collect_task_crud():
+    created = client.post(
+        "/api/collect/tasks",
+        json={"target_id": "t1", "channel": "rpa", "interval_s": 900},
+    )
+    assert created.status_code == 200, created.text
+    task = created.json()
+    assert task["interval_s"] == 900
+
+    listing = client.get("/api/collect/tasks").json()
+    assert any(item["id"] == task["id"] for item in listing["tasks"])
+
+    cancelled = client.delete(f"/api/collect/tasks/{task['id']}")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+
+def test_collect_task_bad_channel_returns_400():
+    response = client.post(
+        "/api/collect/tasks", json={"target_id": "t1", "channel": "selenium"}
+    )
+    assert response.status_code == 400
+
+
 def test_review_missing_returns_404():
     response = client.post("/api/collect/reviews/nope/resolve?decision=released")
     assert response.status_code == 404

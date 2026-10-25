@@ -6,7 +6,7 @@ from typing import Any
 from . import db
 
 CHANNELS = ("api", "rpa", "manual")
-STATUSES = ("pending", "running", "done", "failed")
+STATUSES = ("pending", "running", "done", "failed", "cancelled")
 
 
 def _iso(offset_s: float = 0) -> str:
@@ -22,19 +22,22 @@ def create(
     channel: str,
     priority: int = 0,
     max_attempts: int = 3,
+    interval_s: int = 0,
     next_run_at: str | None = None,
 ) -> str:
     if channel not in CHANNELS:
         raise ValueError(f"unknown channel: {channel}")
+    if interval_s < 0:
+        raise ValueError("interval_s must be >= 0")
     task_id = db.new_id()
     now = db.now_iso()
     conn.execute(
         "INSERT INTO collect_task"
         " (id, target_id, channel, status, priority, attempts, max_attempts,"
-        "  next_run_at, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,0,?,?,?,?)",
+        "  interval_s, next_run_at, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,0,?,?,?,?,?)",
         (task_id, target_id, channel, "pending", priority, max_attempts,
-         next_run_at, now, now),
+         interval_s, next_run_at, now, now),
     )
     return task_id
 
@@ -94,6 +97,39 @@ def fail(
         (status, next_run_at, error[:500], db.now_iso(), task_id),
     )
     return status
+
+
+def reschedule(conn: Any, task_id: str, *, interval_s: float) -> None:
+    """周期性任务：下发完成后回到 pending，下次到点再领。"""
+    conn.execute(
+        "UPDATE collect_task SET status='pending', attempts=0, locked_at=NULL,"
+        " next_run_at=?, updated_at=? WHERE id=?",
+        (_iso(max(interval_s, 1)), db.now_iso(), task_id),
+    )
+
+
+def cancel(conn: Any, task_id: str) -> bool:
+    if get(conn, task_id) is None:
+        return False
+    conn.execute(
+        "UPDATE collect_task SET status='cancelled', locked_at=NULL, updated_at=?"
+        " WHERE id=?",
+        (db.now_iso(), task_id),
+    )
+    return True
+
+
+def list_tasks(
+    conn: Any, *, channel: str | None = None, limit: int = 200
+) -> list[dict]:
+    sql = "SELECT * FROM collect_task"
+    params: list[Any] = []
+    if channel:
+        sql += " WHERE channel = ?"
+        params.append(channel)
+    sql += " ORDER BY created_at DESC, id DESC LIMIT ?"
+    params.append(max(1, min(limit, 500)))
+    return [dict(row) for row in conn.execute(sql, tuple(params)).fetchall()]
 
 
 def release_stale(conn: Any, *, older_than_s: float = 900) -> int:

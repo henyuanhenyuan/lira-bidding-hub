@@ -93,19 +93,21 @@ def dispatch_due(
 
         latency_ms = int((time.perf_counter() - began) * 1000)
         with db.get_db() as conn:
-            if result.status == "done":
-                if result.observations:
-                    ingest.ingest(conn, result.observations, source=channel)
-                collect_tasks.complete(conn, task_id)
-                risk.record_success(channel, account, shop, client=risk_client)
-            elif result.status == "skipped":
+            interval = int(task.get("interval_s") or 0)
+            if result.status == "skipped":
                 collect_tasks.fail(
                     conn, task_id, result.detail or "skipped",
                     retry_delay_s=SKIP_RETRY_S,
                 )
             else:
-                collect_tasks.complete(conn, task_id)
+                if result.status == "done":
+                    if result.observations:
+                        ingest.ingest(conn, result.observations, source=channel)
                 risk.record_success(channel, account, shop, client=risk_client)
+                if interval > 0:
+                    collect_tasks.reschedule(conn, task_id, interval_s=interval)
+                else:
+                    collect_tasks.complete(conn, task_id)
             collect_logs.record(
                 conn, task_id=task_id, channel=channel, account=account,
                 shop=shop, latency_ms=latency_ms, outcome=result.status,

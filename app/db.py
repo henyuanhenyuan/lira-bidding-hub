@@ -342,6 +342,7 @@ CREATE TABLE IF NOT EXISTS collect_task (
   priority INTEGER NOT NULL DEFAULT 0,
   attempts INTEGER NOT NULL DEFAULT 0,
   max_attempts INTEGER NOT NULL DEFAULT 3,
+  interval_s INTEGER NOT NULL DEFAULT 0,
   next_run_at TEXT,
   locked_at TEXT,
   last_error TEXT,
@@ -549,6 +550,7 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "doc_chunk", "level", "TEXT NOT NULL DEFAULT 'child'")
     _ensure_column(conn, "skill", "stages", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "skill", "output_schema", "TEXT")
+    _ensure_column(conn, "collect_task", "interval_s", "INTEGER NOT NULL DEFAULT 0")
     # 向量已迁到 Qdrant，旧库里的 embedding 列不再写入
     _drop_column(conn, "case", "embedding")
     _drop_column(conn, "doc_chunk", "embedding")
