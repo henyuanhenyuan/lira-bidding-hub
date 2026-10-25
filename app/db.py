@@ -331,6 +331,23 @@ CREATE TABLE IF NOT EXISTS outcome_reminder (
   suggestion_id TEXT PRIMARY KEY,
   last_sent_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS collect_task (
+  id TEXT PRIMARY KEY,
+  target_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  priority INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  max_attempts INTEGER NOT NULL DEFAULT 3,
+  next_run_at TEXT,
+  locked_at TEXT,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_collect_task_pick
+  ON collect_task(channel, status, next_run_at);
 """
 
 
