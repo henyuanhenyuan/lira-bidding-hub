@@ -38,3 +38,16 @@ def task_digest() -> str:
 @shared_task(name="lira.job.backup")
 def task_backup() -> str:
     return scheduler.run_now("backup")
+
+
+@shared_task(name="lira.job.collect_dispatch")
+def task_collect_dispatch() -> dict:
+    from . import collector
+
+    out: dict = {}
+    for channel in ("api", "rpa", "manual"):
+        try:
+            out[channel] = collector.dispatch_due(channel)
+        except Exception as exc:
+            out[channel] = {"error": str(exc)}
+    return out

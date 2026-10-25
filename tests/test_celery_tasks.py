@@ -32,3 +32,13 @@ def test_celery_task_records_job_run():
 
 def test_run_now_supports_backup():
     assert scheduler.run_now("backup")
+
+
+def test_beat_schedule_runs_collect_dispatch():
+    from app.celery_app import celery_app
+
+    assert "lira.job.collect_dispatch" in celery_app.conf.beat_schedule
+    assert (
+        celery_app.conf.beat_schedule["lira.job.collect_dispatch"]["task"]
+        == "lira.job.collect_dispatch"
+    )

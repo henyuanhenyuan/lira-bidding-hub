@@ -41,6 +41,10 @@ def _beat_schedule() -> dict:
         "task": "lira.job.backup",
         "schedule": crontab(hour=backup_h, minute=backup_m),
     }
+    schedule["lira.job.collect_dispatch"] = {
+        "task": "lira.job.collect_dispatch",
+        "schedule": float(os.getenv("LIRA_COLLECT_INTERVAL", "15")),
+    }
     return schedule
 
 
