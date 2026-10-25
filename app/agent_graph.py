@@ -28,6 +28,8 @@ class AgentState(TypedDict, total=False):
     allowed_evidence: list[str]
     analysis: dict[str, Any]
     checks: dict[str, Any]
+    risk: dict[str, Any]
+    proposal: dict[str, Any]
     suggestion: dict[str, Any]
     skill: dict[str, Any]
 
@@ -357,6 +359,49 @@ def _act_node(state: AgentState) -> AgentState:
     return {"tool_results": results, "seq": seq}
 
 
+def _stages(state: AgentState) -> set[str]:
+    skill = state.get("skill") or {}
+    stages = skill.get("stages")
+    return set(stages) if stages else set(skills.DEFAULT_STAGES)
+
+
+def _steward_node(state: AgentState) -> AgentState:
+    """数据可信度门禁：采集过期时不允许 L3，降级并标注原因（默认关闭）。"""
+    run_id = state["run_id"]
+    seq = state.get("seq", 0) + 1
+    started = time.perf_counter()
+    facts = dict(state["facts"])
+
+    freshness: dict[str, Any] | None = None
+    for item in state.get("tool_results", []):
+        if item["tool"] == "collection_health" and item["status"] == "ok":
+            freshness = (item.get("result") or {}).get("freshness") or {}
+            break
+    stale = bool(freshness.get("stale")) if freshness else True
+
+    downgraded = False
+    if (
+        os.getenv("LIRA_STEWARD_ENFORCE", "off") == "on"
+        and stale
+        and facts.get("severity") == "L3"
+    ):
+        facts["severity"] = "L2"
+        facts["downgraded_by_freshness"] = True
+        downgraded = True
+
+    _step(
+        run_id, seq, "steward", "采集健康门禁",
+        {"event_id": state.get("event_id")},
+        {"stale": stale, "downgraded": downgraded},
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
+    return {"facts": facts, "seq": seq}
+
+
+def _route_after_tools(state: AgentState) -> str:
+    return "steward" if "steward" in _stages(state) else "analysis"
+
+
 def _cases_from_results(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in results:
         if item["tool"] == "search_cases" and item["status"] == "ok" and item["result"]:
@@ -533,21 +578,13 @@ def _verify_node(state: AgentState) -> AgentState:
     return {"analysis": analysis, "checks": checks, "seq": seq}
 
 
-def _propose_node(state: AgentState) -> AgentState:
+def _risk_node(state: AgentState) -> AgentState:
     run_id = state["run_id"]
     seq = state.get("seq", 0) + 1
     started = time.perf_counter()
     facts = state["facts"]
     analysis = state["analysis"]
-    cases = _cases_from_results(state.get("tool_results", []))
 
-    my_price = facts.get("my_price")
-    impact_low = (
-        round(my_price - facts["price_high"], 2) if my_price is not None else None
-    )
-    impact_high = (
-        round(my_price - facts["price_low"], 2) if my_price is not None else None
-    )
     target_price = (
         round(facts["point"], 2)
         if analysis["action"] in ("follow", "adjust_coupon")
@@ -556,6 +593,63 @@ def _propose_node(state: AgentState) -> AgentState:
     check = guardrail.evaluate(
         target_price, facts.get("cost"), facts.get("margin_floor", 0.15)
     )
+    payload = {
+        "target_price": target_price,
+        "guardrail": {**check.as_dict(), "status": check.status},
+        "floor": check.floor,
+    }
+    _step(
+        run_id, seq, "risk", "毛利与可行性",
+        {"action": analysis["action"], "target_price": target_price},
+        payload,
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
+    return {"risk": payload, "seq": seq}
+
+
+def _writer_node(state: AgentState) -> AgentState:
+    run_id = state["run_id"]
+    seq = state.get("seq", 0) + 1
+    started = time.perf_counter()
+    facts = state["facts"]
+    analysis = state["analysis"]
+    risk_payload = state.get("risk") or {}
+    my_price = facts.get("my_price")
+
+    proposal = {
+        "action": analysis["action"],
+        "narrative": analysis["narrative"],
+        "impact_low": (
+            round(my_price - facts["price_high"], 2) if my_price is not None else None
+        ),
+        "impact_high": (
+            round(my_price - facts["price_low"], 2) if my_price is not None else None
+        ),
+        "target_price": risk_payload.get("target_price"),
+    }
+    _step(
+        run_id, seq, "writer", "生成建议文案",
+        {"action": analysis["action"]},
+        {"impact_low": proposal["impact_low"], "impact_high": proposal["impact_high"]},
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
+    return {"proposal": proposal, "seq": seq}
+
+
+def _propose_node(state: AgentState) -> AgentState:
+    run_id = state["run_id"]
+    seq = state.get("seq", 0) + 1
+    started = time.perf_counter()
+    facts = state["facts"]
+    analysis = state["analysis"]
+    cases = _cases_from_results(state.get("tool_results", []))
+
+    proposal = state.get("proposal") or {}
+    risk_payload = state.get("risk") or {}
+    check = risk_payload.get("guardrail") or {}
+    impact_low = proposal.get("impact_low")
+    impact_high = proposal.get("impact_high")
+    target_price = proposal.get("target_price")
 
     suggestion_id = db.new_id()
     with db.get_db() as conn:
@@ -570,8 +664,9 @@ def _propose_node(state: AgentState) -> AgentState:
                 impact_low, impact_high, analysis["confidence"], facts["gate_level"],
                 analysis["narrative"], analysis["generated_by"],
                 json.dumps([item["id"] for item in cases], ensure_ascii=False),
-                target_price, check.as_dict()["margin_at_target"], check.floor,
-                check.status, check.note,
+                target_price, check.get("margin_at_target"),
+                risk_payload.get("floor", facts.get("margin_floor", 0.15)),
+                check.get("status", "unknown"), check.get("guardrail_note"),
                 "holdout" if facts.get("holdout") else "pending",
                 db.now_iso(), run_id,
             ),
@@ -588,7 +683,7 @@ def _propose_node(state: AgentState) -> AgentState:
     _step(
         run_id, seq, "suggestion", "写入建议",
         {"action": analysis["action"]},
-        {"suggestion_id": suggestion_id, "guardrail": check.status},
+        {"suggestion_id": suggestion_id, "guardrail": check.get("status", "unknown")},
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
     return {"suggestion": suggestion, "seq": seq}
@@ -601,23 +696,40 @@ def _build_graph():
     graph.add_node("load", _load_context)
     graph.add_node("planning", _plan_node)
     graph.add_node("tools", _act_node)
+    graph.add_node("steward", _steward_node)
     graph.add_node("analysis", _analyze_node)
+    graph.add_node("risk", _risk_node)
     graph.add_node("verification", _verify_node)
+    graph.add_node("writer", _writer_node)
     graph.add_node("suggest", _propose_node)
     graph.set_entry_point("load")
     graph.add_edge("load", "planning")
     graph.add_edge("planning", "tools")
-    graph.add_edge("tools", "analysis")
-    graph.add_edge("analysis", "verification")
-    graph.add_edge("verification", "suggest")
+    graph.add_conditional_edges(
+        "tools", _route_after_tools,
+        {"steward": "steward", "analysis": "analysis"},
+    )
+    graph.add_edge("steward", "analysis")
+    graph.add_edge("analysis", "risk")
+    graph.add_edge("risk", "verification")
+    graph.add_edge("verification", "writer")
+    graph.add_edge("writer", "suggest")
     graph.add_edge("suggest", END)
     return graph.compile()
 
 
+def _run_without_langgraph(state: AgentState) -> AgentState:
+    final = dict(state)
+    for node in (_load_context, _plan_node, _act_node):
+        final.update(node(final))  # type: ignore[arg-type]
+    if "steward" in _stages(final):
+        final.update(_steward_node(final))  # type: ignore[arg-type]
+    for node in (_analyze_node, _risk_node, _verify_node, _writer_node, _propose_node):
+        final.update(node(final))  # type: ignore[arg-type]
+    return final  # type: ignore[return-value]
+
+
 GRAPH = _build_graph()
-_NODES = (
-    _load_context, _plan_node, _act_node, _analyze_node, _verify_node, _propose_node,
-)
 
 
 def run_for_event(event_id: str, trigger: str = "api") -> dict[str, Any]:
@@ -633,9 +745,7 @@ def run_for_event(event_id: str, trigger: str = "api") -> dict[str, Any]:
         if GRAPH is not None:
             final = GRAPH.invoke(state)
         else:
-            final = dict(state)
-            for node in _NODES:
-                final.update(node(final))  # type: ignore[arg-type]
+            final = _run_without_langgraph(state)
 
         suggestion = final["suggestion"]
         seq = final.get("seq", 0) + 1

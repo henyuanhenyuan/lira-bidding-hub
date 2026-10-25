@@ -45,7 +45,10 @@ def test_graph_creates_suggestion_and_trace():
 
     kinds = [step["kind"] for step in run["steps"]]
     assert kinds[0] == "context"
-    for expected in ("plan", "tool", "analysis", "verify", "suggestion", "finalize"):
+    for expected in (
+        "plan", "tool", "steward", "analysis", "risk", "verify", "writer",
+        "suggestion", "finalize",
+    ):
         assert expected in kinds
 
     tool_names = [step["name"] for step in run["steps"] if step["kind"] == "tool"]
