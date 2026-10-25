@@ -9,10 +9,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import (
-    agent, agent_graph, alignment, approval, auth, collectors, config, connectors,
-    csvimport, db, docs as doc_store, eval as eval_store, executor, gates,
-    guardrail, ingest, inbox, metrics, nlq, notify, reviews as review_store,
-    scheduler, skills, stream,
+    agent, agent_graph, alignment, approval, auth, collect_logs, collectors,
+    config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
+    executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
+    review_queue, reviews as review_store, scheduler, skills, stream,
 )
 from . import outcome as outcome_store
 from . import cases as case_store
@@ -1148,6 +1148,52 @@ def ops_inbox_scan(
     actor: str = Depends(auth.require_role("admin")),
 ) -> dict[str, Any]:
     return {"results": inbox.scan_once()}
+
+
+# ---------------- 采集运维 ----------------
+
+@router.get("/api/collect/logs")
+def collect_log_list(
+    limit: int = 100,
+    channel: str | None = None,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        return {"logs": collect_logs.recent(conn, limit=limit, channel=channel)}
+
+
+@router.get("/api/collect/summary")
+def collect_log_summary(
+    hours: int = 24,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        return collect_logs.summary(conn, hours=hours)
+
+
+@router.get("/api/collect/reviews")
+def collect_review_list(
+    limit: int = 100,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        return {"reviews": review_queue.pending(conn, limit=limit)}
+
+
+@router.post("/api/collect/reviews/{review_id}/resolve")
+def collect_review_resolve(
+    review_id: str,
+    decision: str,
+    actor: str = Depends(auth.require_role("admin")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        try:
+            status = review_queue.resolve(conn, review_id, decision, actor)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    if status is None:
+        raise HTTPException(404, "review not found")
+    return {"id": review_id, "status": status}
 
 
 # ---------------- 健康 ----------------

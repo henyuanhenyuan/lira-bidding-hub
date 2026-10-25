@@ -1,0 +1,65 @@
+from fastapi.testclient import TestClient
+
+from app import collect_logs, db, review_queue
+from app.main import app
+
+client = TestClient(app)
+
+
+def test_collect_logs_endpoint():
+    with db.get_db() as conn:
+        collect_logs.record(
+            conn, task_id="t1", channel="rpa", outcome="done", latency_ms=100
+        )
+    response = client.get("/api/collect/logs")
+    assert response.status_code == 200
+    assert response.json()["logs"][0]["task_id"] == "t1"
+
+
+def test_collect_logs_filters_channel():
+    with db.get_db() as conn:
+        collect_logs.record(conn, task_id="r1", channel="rpa", outcome="done")
+        collect_logs.record(conn, task_id="a1", channel="api", outcome="done")
+    body = client.get("/api/collect/logs?channel=api").json()
+    assert [row["task_id"] for row in body["logs"]] == ["a1"]
+
+
+def test_collect_summary_endpoint():
+    with db.get_db() as conn:
+        collect_logs.record(conn, task_id="t1", channel="rpa", outcome="error",
+                            error_kind="captcha")
+    body = client.get("/api/collect/summary?hours=24").json()
+    assert body["outcomes"]["error"] == 1
+    assert body["errors"]["captcha"] == 1
+
+
+def test_review_queue_list_and_resolve():
+    with db.get_db() as conn:
+        review_id = review_queue.enqueue(
+            conn, task_id="t1", channel="rpa", reason="captcha"
+        )
+    listing = client.get("/api/collect/reviews").json()
+    assert listing["reviews"][0]["id"] == review_id
+
+    resolved = client.post(
+        f"/api/collect/reviews/{review_id}/resolve?decision=released"
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["status"] == "released"
+    assert client.get("/api/collect/reviews").json()["reviews"] == []
+
+
+def test_review_bad_decision_returns_400():
+    with db.get_db() as conn:
+        review_id = review_queue.enqueue(
+            conn, task_id="t1", channel="rpa", reason="captcha"
+        )
+    response = client.post(
+        f"/api/collect/reviews/{review_id}/resolve?decision=nope"
+    )
+    assert response.status_code == 400
+
+
+def test_review_missing_returns_404():
+    response = client.post("/api/collect/reviews/nope/resolve?decision=released")
+    assert response.status_code == 404

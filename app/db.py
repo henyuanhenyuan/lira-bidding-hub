@@ -348,6 +348,35 @@ CREATE TABLE IF NOT EXISTS collect_task (
 );
 CREATE INDEX IF NOT EXISTS ix_collect_task_pick
   ON collect_task(channel, status, next_run_at);
+
+CREATE TABLE IF NOT EXISTS collect_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  task_id TEXT,
+  channel TEXT NOT NULL,
+  account TEXT,
+  shop TEXT,
+  status_code INTEGER,
+  latency_ms INTEGER,
+  outcome TEXT NOT NULL,
+  error_kind TEXT,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_collect_log_ts ON collect_log(ts DESC);
+
+CREATE TABLE IF NOT EXISTS manual_review (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  target_id TEXT,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT,
+  resolved_by TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_manual_review_status
+  ON manual_review(status, created_at);
 """
 
 

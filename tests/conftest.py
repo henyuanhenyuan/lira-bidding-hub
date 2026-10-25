@@ -74,6 +74,8 @@ TABLES = [
     "case_fts",
     "case",
     "collect_task",
+    "collect_log",
+    "manual_review",
 ]
 
 if TEST_BACKEND == "postgres":
