@@ -2,6 +2,7 @@ x-lira-env: &lira-env
   LIRA_DATA_DIR: /data
   LIRA_DATABASE_URL: postgresql://lira:lira@db:5432/lira
   LIRA_REDIS_URL: redis://redis:6379/0
+  LIRA_QDRANT_URL: http://qdrant:6333
   # 宿主机上的 Ollama；不可用时自动走模板
   LIRA_OLLAMA_URL: http://host.docker.internal:11434
   LIRA_OLLAMA_MODEL: qwen3:4b
@@ -41,6 +42,14 @@ services:
       retries: 10
     restart: unless-stopped
 
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant:/qdrant/storage
+    restart: unless-stopped
+
   lira:
     build: .
     depends_on:
@@ -48,6 +57,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      qdrant:
+        condition: service_started
     ports:
       - "8010:8010"
     environment: *lira-env
@@ -89,3 +100,4 @@ services:
 
 volumes:
   pgdata:
+  qdrant:

@@ -66,6 +66,10 @@ ollama pull qwen3:4b
 | `LIRA_RL_CAPACITY` | `1` | 令牌桶容量（突发上限） |
 | `LIRA_COLLECT_ACCOUNT` | `default` | 未在任务上指定账号时的默认值 |
 | `LIRA_COLLECT_SHOP` | `default` | 未在任务上指定店铺时的默认值 |
+| `LIRA_QDRANT_URL` | 空 | 设置后连 Qdrant 服务；不设则用 `data/qdrant` 本地目录模式 |
+| `LIRA_RERANK_URL` | 空 | 模型重排地址（TEI / Jina 兼容）；不设则走规则重排 |
+| `LIRA_RERANK_MODEL` | `bge-reranker-v2-m3` | 重排模型名 |
+| `LIRA_RERANK_TIMEOUT` | `5` | 重排超时（秒），超时自动降级 |
 | `LIRA_INBOX_INTERVAL` | `15` | 收件箱轮询间隔（秒） |
 | `LIRA_DIGEST_AT` | `09:00` | 每日摘要触发时间（本地时区） |
 | `LIRA_WEBHOOK` | 空 | 企业微信/钉钉机器人地址 |
@@ -213,7 +217,7 @@ celery -A app.celery_app beat --loglevel=info
 
 | 变化 | 判定 | 事件 |
 |---|---|---|
-| 标题 | 字符二元组 Jaccard 相似度；提取新增/删除的说法 | `title_change`（相似度 <60% 记 L2，否则 L1） |
+| 标题 | 向量余弦相似度；提取新增/删除的说法 | `title_change`（相似度 <60% 记 L2，否则 L1） |
 | 主图 | `main_image_url` 变化 | `image_change`（L1） |
 
 标题差异会指出**具体改了什么**，例如"标题变化（相似度 54%）：新增 买一送一、限时"。
@@ -313,7 +317,7 @@ pending ──提交──▶ submitted ──批准──▶ approved ──执
 ## 部署
 
 ```bash
-# Docker（应用 + PostgreSQL 16；镜像内会构建新版前端）
+# Docker（应用 + worker + beat + PostgreSQL 16 + Redis + Qdrant；镜像内会构建新版前端）
 docker compose up -d
 
 # Windows 服务（需先安装 nssm）
@@ -344,15 +348,18 @@ python scripts/backup.py D:\backup
 **四级检索管线**（`app/cases.py`）：
 
 ```
-1. 结构化预过滤   event_type / category / 价格带
-2. 向量召回       bge-m3 余弦，Top 20
-3. 关键词召回     FTS5 trigram，Top 20
+1. 结构化预过滤   下推为 Qdrant payload 过滤（category / event_type）
+2. 向量召回       Qdrant 余弦，Top 20
+3. 关键词召回     FTS5 trigram / pg_trgm，Top 20
 4. RRF 融合 + 重排 价格带接近、幅度接近加权 → Top 3
 ```
 
-**向量存储的取舍**：Milvus Lite 官方不支持 Windows，pgvector 需要额外起 PostgreSQL。
-当前版本把向量存在 SQLite（`BLOB` + 精确余弦），保持"一条命令跑起来"；
-`search()` 是唯一入口，后续换 Milvus / pgvector 只改这一个函数。
+**向量存储**：Qdrant。集合按 provider 与维度隔离（`case_embeddings_<provider>_<dim>`），
+避免不同 embedding 空间互相比较。生产连服务端（`LIRA_QDRANT_URL`），
+本地不配时用 `data/qdrant` 目录模式，单进程可用、多进程必须起服务。
+
+旧库的历史向量不迁移：`case` / `doc_chunk` 的 `embedding` 列在初始化时删除，
+重建用 `python scripts/reindex_vectors.py`（按文本重新嵌入，provider 变化也安全）。
 
 **Embedding 双路**：Ollama 可用时走 `bge-m3`（1024 维），不可用时自动退回
 字符 n-gram 哈希向量（256 维），检索功能不中断。
@@ -393,8 +400,9 @@ python -m app.mcp_server
 
 ## 规则文档 RAG
 
-规则文档按段落切分（500 字窗口、80 字重叠），逐片向量化后存入 `doc_chunk`。
-检索走「向量召回 + 关键词召回 + RRF」，命中切片以 `doc:<chunk_id>` 进入证据链。
+规则文档用 LlamaIndex 做**父子块**切分：父块约 1200 字（按小节），子块约 300 字（按句群）。
+子块向量存 Qdrant 用于召回，命中后把父块内容一起返回给模型，避免切片把语义切断。
+检索走「向量召回 + 关键词召回 + RRF」，命中子块以 `doc:<chunk_id>` 进入证据链。
 
 - 切片内容与来源都可以回溯：建议详情里会列出引用规则原文
 - 站内 Agent 通过 `search_docs` 工具取规则；外部 Agent 通过 MCP 拿同一个工具
@@ -621,6 +629,6 @@ LIRA_TEST_DB=postgres python -m pytest -q
 - 关键词召回按后端分流：SQLite 用 FTS5 trigram，PostgreSQL 用 pg_trgm + ILIKE
 - SSE 走进程内广播，只支持单进程；多 worker 需换 Redis pub/sub
 - 登录为独立页面 + 服务端守卫；角色化 UI 已在菜单与审批按钮生效，账号管理暂只有接口
-- 向量存 SQLite（精确余弦），未接 Milvus/pgvector；检索已加轻量重排，未接模型级 reranker
+- 向量已迁到 Qdrant；模型级 reranker 需自备服务，未配置时走规则重排
 - TLS 需外置反向代理（Caddy/Nginx），应用本身只监听 HTTP
 - 4B 模型的叙事质量一般，事实与数字仍由工具保证
