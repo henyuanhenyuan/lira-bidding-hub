@@ -179,6 +179,11 @@ def _cleanup(run_key: str, target_ids: list[str]) -> None:
         conn.execute("DELETE FROM ingest_log WHERE source = ?", (f"eval:{run_key}",))
 
 
+def _trace_ok(trace: list[str]) -> bool:
+    """Steward 是可选阶段（Skill 的 stages 可以裁掉），其余四段必须在。"""
+    return {"analysis", "risk", "verify", "writer"}.issubset(set(trace))
+
+
 def _trace_kinds(run_id: str) -> list[str]:
     with db.get_db() as conn:
         rows = conn.execute(
@@ -274,9 +279,7 @@ def run(limit: int | None = None) -> dict[str, Any]:
 
         actual_action = suggestion["action"] if suggestion else None
         trace = _trace_kinds(suggestion["agent_run_id"]) if suggestion else []
-        trace_ok = {"steward", "analysis", "risk", "verify", "writer"}.issubset(
-            set(trace)
-        )
+        trace_ok = _trace_ok(trace)
         passed = bool(
             suggestion
             and actual_action == case["expected_action"]

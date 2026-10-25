@@ -7,6 +7,11 @@ from app.main import app
 client = TestClient(app)
 
 
+def test_trace_ok_does_not_require_steward():
+    assert eval_store._trace_ok(["analysis", "risk", "verify", "writer"]) is True
+    assert eval_store._trace_ok(["analysis", "verify", "writer"]) is False
+
+
 def test_golden_cases_all_pass_and_cleanup():
     with db.get_db() as conn:
         conn.execute(

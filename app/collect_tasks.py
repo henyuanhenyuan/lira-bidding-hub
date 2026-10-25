@@ -99,6 +99,19 @@ def fail(
     return status
 
 
+def defer(conn: Any, task_id: str, *, delay_s: float) -> None:
+    """限流/熔断属于短暂背压，不消耗重试次数，避免任务被永久判失败。"""
+    row = get(conn, task_id)
+    if row is None:
+        return
+    attempts = max(0, int(row["attempts"]) - 1)
+    conn.execute(
+        "UPDATE collect_task SET status='pending', attempts=?, next_run_at=?,"
+        " locked_at=NULL, updated_at=? WHERE id=?",
+        (attempts, _iso(max(delay_s, 1)), db.now_iso(), task_id),
+    )
+
+
 def reschedule(conn: Any, task_id: str, *, interval_s: float) -> None:
     """周期性任务：下发完成后回到 pending，下次到点再领。"""
     conn.execute(

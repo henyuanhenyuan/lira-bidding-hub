@@ -13,7 +13,7 @@ from . import (
     collectors,
     config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
     executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
-    review_queue, reviews as review_store, scheduler, skills, stream,
+    review_queue, reviews as review_store, scheduler, skills, stream, vectorstore,
 )
 from . import outcome as outcome_store
 from . import cases as case_store
@@ -1281,11 +1281,22 @@ def health() -> dict[str, Any]:
             " GROUP BY collector ORDER BY last_ts DESC"
         ).fetchall()
         freshness = collectors.freshness(conn)
+
+    store = vectorstore.QdrantVectorStore()
+    indexed = sum(
+        store.count(name) for name in store.collections("case_embeddings_")
+    )
+    vector_index = {
+        "indexed": indexed,
+        "cases": counts["cases"],
+        "stale": indexed < counts["cases"],
+    }
     return {
         "ok": True,
         "counts": counts,
         "last_ingest": dict(last) if last else None,
         "collectors": [dict(r) for r in by_collector],
         "freshness": freshness,
+        "vector_index": vector_index,
         "llm_available": agent._llm_available(),
     }

@@ -167,6 +167,13 @@ class QdrantVectorStore:
             ),
         )
 
+    def collections(self, prefix: str = "") -> list[str]:
+        return [
+            item.name
+            for item in self.client.get_collections().collections
+            if item.name.startswith(prefix)
+        ]
+
     def count(self, collection: str) -> int:
         if not self.client.collection_exists(collection):
             return 0

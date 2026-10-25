@@ -60,6 +60,13 @@ def test_review_bad_decision_returns_400():
     assert response.status_code == 400
 
 
+def test_health_reports_vector_index():
+    body = client.get("/api/health").json()
+    assert "vector_index" in body
+    assert body["vector_index"]["cases"] >= 0
+    assert isinstance(body["vector_index"]["stale"], bool)
+
+
 def test_collect_task_crud():
     created = client.post(
         "/api/collect/tasks",

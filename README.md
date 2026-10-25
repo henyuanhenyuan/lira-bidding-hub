@@ -66,6 +66,9 @@ ollama pull qwen3:4b
 | `LIRA_RL_CAPACITY` | `1` | 令牌桶容量（突发上限） |
 | `LIRA_COLLECT_ACCOUNT` | `default` | 未在任务上指定账号时的默认值 |
 | `LIRA_COLLECT_SHOP` | `default` | 未在任务上指定店铺时的默认值 |
+| `LIRA_RISK_THRESHOLD` | `3` | 连续失败多少次触发熔断 |
+| `LIRA_RISK_COOLDOWN` | `600` | 熔断冷却秒数，到期放行一次探测 |
+| `LIRA_COLLECT_STALE` | `900` | 超过多少秒仍停在 running 的任务放回待下发 |
 | `LIRA_QDRANT_URL` | 空 | 设置后连 Qdrant 服务；不设则用 `data/qdrant` 本地目录模式 |
 | `LIRA_RERANK_URL` | 空 | 模型重排地址（TEI / Jina 兼容）；不设则走规则重排 |
 | `LIRA_RERANK_MODEL` | `bge-reranker-v2-m3` | 重排模型名 |

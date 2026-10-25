@@ -86,6 +86,61 @@ def test_recurring_task_is_rescheduled():
     assert row["next_run_at"] is not None
 
 
+def test_dispatch_error_opens_circuit(monkeypatch):
+    from app import risk
+
+    class Boom:
+        channel = "rpa"
+
+        def dispatch(self, task):
+            raise RuntimeError("请输入验证码")
+
+    with db.get_db() as conn:
+        collect_tasks.create(conn, target_id="t1", channel="rpa")
+    client = _client()
+    monkeypatch.setattr(collector, "RISK_THRESHOLD", 1)
+    summary = collector.dispatch_due(
+        "rpa", adapter=Boom(), rl_client=_client(), risk_client=client
+    )
+    assert summary["error"] == 1
+    assert risk.state("rpa", "default", "default", client=client) == "open"
+    with db.get_db() as conn:
+        assert len(review_queue.pending(conn)) == 1
+
+
+def test_recover_stale_returns_task_to_pending():
+    with db.get_db() as conn:
+        task_id = collect_tasks.create(conn, target_id="t1", channel="rpa")
+        collect_tasks.claim(conn, channel="rpa")
+    assert collector.recover_stale(older_than_s=-1) == 1
+    with db.get_db() as conn:
+        assert collect_tasks.get(conn, task_id)["status"] == "pending"
+
+
+def test_rate_limit_backpressure_does_not_exhaust_retries():
+    client = _client()
+    with db.get_db() as conn:
+        collect_tasks.create(conn, target_id="warmup", channel="rpa")
+    collector.dispatch_due(
+        "rpa", adapter=FakeAdapter(DispatchResult("pending")),
+        rl_client=client, risk_client=_client(), rate=0.1, capacity=1, now=1000.0,
+    )
+    with db.get_db() as conn:
+        task_id = collect_tasks.create(
+            conn, target_id="t1", channel="rpa", max_attempts=1
+        )
+    for _ in range(3):
+        collector.dispatch_due(
+            "rpa", adapter=FakeAdapter(DispatchResult("pending")),
+            rl_client=client, risk_client=_client(),
+            rate=0.1, capacity=1, now=1000.0,
+        )
+    with db.get_db() as conn:
+        row = collect_tasks.get(conn, task_id)
+    assert row["status"] == "pending"
+    assert row["attempts"] == 0
+
+
 def test_open_circuit_blocks_and_enqueues_review():
     from app import risk
 

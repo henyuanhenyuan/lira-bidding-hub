@@ -44,7 +44,7 @@ def task_backup() -> str:
 def task_collect_dispatch() -> dict:
     from . import collector
 
-    out: dict = {}
+    out: dict = {"recovered": collector.recover_stale()}
     for channel in ("api", "rpa", "manual"):
         try:
             out[channel] = collector.dispatch_due(channel)
