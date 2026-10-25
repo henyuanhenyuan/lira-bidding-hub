@@ -1,7 +1,17 @@
 from __future__ import annotations
 
+import logging
+import os
 import re
 from datetime import datetime, timezone
+
+import httpx
+
+log = logging.getLogger(__name__)
+
+RERANK_URL = os.getenv("LIRA_RERANK_URL", "")
+RERANK_MODEL = os.getenv("LIRA_RERANK_MODEL", "bge-reranker-v2-m3")
+RERANK_TIMEOUT_S = float(os.getenv("LIRA_RERANK_TIMEOUT", "5"))
 
 _TOKEN = re.compile(r"[a-zA-Z0-9]+|[一-龥]{2}")
 
@@ -49,6 +59,49 @@ def score(
     )
 
 
+def _rule_rerank(
+    cases: list[dict],
+    *,
+    query: str,
+    price_band: str | None,
+    delta_pct: float | None,
+    limit: int,
+) -> list[dict]:
+    tokens = _tokens(query)
+    ranked = sorted(
+        cases,
+        key=lambda c: -score(
+            c, query_tokens=tokens, price_band=price_band, delta_pct=delta_pct
+        ),
+    )
+    return ranked[:limit]
+
+
+def _model_rerank(
+    cases: list[dict], query: str, limit: int
+) -> list[dict] | None:
+    documents = [f"{c.get('summary', '')} {c.get('attribution', '')}" for c in cases]
+    response = httpx.post(
+        RERANK_URL,
+        json={"model": RERANK_MODEL, "query": query, "documents": documents},
+        timeout=RERANK_TIMEOUT_S,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    rows = payload.get("results") or payload.get("data") or []
+    scored: list[tuple[dict, float]] = []
+    for row in rows:
+        index = row.get("index")
+        value = row.get("relevance_score", row.get("score"))
+        if index is None or value is None:
+            continue
+        scored.append((cases[int(index)], float(value)))
+    if not scored:
+        return None
+    scored.sort(key=lambda pair: -pair[1])
+    return [case for case, _ in scored[:limit]]
+
+
 def rerank(
     cases: list[dict],
     *,
@@ -59,11 +112,14 @@ def rerank(
 ) -> list[dict]:
     if not cases:
         return []
-    tokens = _tokens(query)
-    ranked = sorted(
-        cases,
-        key=lambda c: -score(
-            c, query_tokens=tokens, price_band=price_band, delta_pct=delta_pct
-        ),
+    if RERANK_URL:
+        try:
+            ranked = _model_rerank(cases, query, limit)
+            if ranked:
+                return ranked
+        except Exception as exc:
+            log.warning("reranker fallback to rules: %s", exc)
+    return _rule_rerank(
+        cases, query=query, price_band=price_band,
+        delta_pct=delta_pct, limit=limit,
     )
-    return ranked[:limit]
