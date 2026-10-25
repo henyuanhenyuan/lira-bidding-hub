@@ -99,8 +99,7 @@ CREATE TABLE IF NOT EXISTS "case" (
   outcome_7d TEXT,
   ts TEXT NOT NULL,
   embed_provider TEXT NOT NULL,
-  dim INTEGER NOT NULL,
-  embedding BLOB NOT NULL
+  dim INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS ingest_log (
@@ -543,6 +542,8 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "suggestion", "margin_floor", "REAL")
     _ensure_column(conn, "suggestion", "guardrail", "TEXT DEFAULT 'unknown'")
     _ensure_column(conn, "suggestion", "guardrail_note", "TEXT")
+    # 向量已迁到 Qdrant，旧库里的 embedding 列不再写入
+    _drop_column(conn, "case", "embedding")
     _ensure_column(conn, "suggestion", "executed_price", "REAL")
     _ensure_column(conn, "suggestion", "submitted_by", "TEXT")
     _ensure_column(conn, "suggestion", "approved_by", "TEXT")
@@ -570,6 +571,15 @@ def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
     cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
     if column not in cols:
         conn.execute(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}')
+
+
+def _drop_column(conn, table: str, column: str) -> None:
+    if BACKEND == "postgres":
+        conn.execute(f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS {column}')
+        return
+    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
+    if column in cols:
+        conn.execute(f'ALTER TABLE "{table}" DROP COLUMN {column}')
 
 
 def row_to_dict(row) -> dict[str, Any]:

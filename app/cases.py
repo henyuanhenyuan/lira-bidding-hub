@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
-
-from . import db, embeddings
+from . import db, embeddings, vectorstore
 
 RRF_K = 60
 
@@ -35,12 +32,9 @@ class Case:
         }
 
 
-def pack(vec: list[float]) -> bytes:
-    return struct.pack(f"{len(vec)}f", *vec)
-
-
-def unpack(blob: bytes) -> np.ndarray:
-    return np.frombuffer(blob, dtype=np.float32)
+def collection_name(provider: str, dim: int) -> str:
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in provider)
+    return f"case_embeddings_{safe}_{dim}"
 
 
 def price_band_of(price: float) -> str:
@@ -72,21 +66,33 @@ def create(
     text = f"{summary}\n{attribution}\n{category} {event_type}"
     vec, provider = embeddings.embed(text)
     cid = case_id or db.new_id()
+    ts_value = ts or db.now_iso()
     conn.execute(
         "INSERT INTO \"case\" (id, category, event_type, price_band, delta_pct,"
-        " summary, attribution, decision, outcome_7d, ts, embed_provider, dim, embedding)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        " summary, attribution, decision, outcome_7d, ts, embed_provider, dim)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
         " ON CONFLICT (id) DO UPDATE SET category=excluded.category,"
         " event_type=excluded.event_type, price_band=excluded.price_band,"
         " delta_pct=excluded.delta_pct, summary=excluded.summary,"
         " attribution=excluded.attribution, decision=excluded.decision,"
         " outcome_7d=excluded.outcome_7d, ts=excluded.ts,"
-        " embed_provider=excluded.embed_provider, dim=excluded.dim,"
-        " embedding=excluded.embedding",
+        " embed_provider=excluded.embed_provider, dim=excluded.dim",
         (
             cid, category, event_type, price_band, delta_pct, summary, attribution,
-            decision, outcome_7d, ts or db.now_iso(), provider, len(vec), pack(vec),
+            decision, outcome_7d, ts_value, provider, len(vec),
         ),
+    )
+    payload: dict[str, Any] = {
+        "category": category,
+        "event_type": event_type,
+        "price_band": price_band,
+        "ts": ts_value,
+    }
+    if delta_pct is not None:
+        payload["delta_pct"] = float(delta_pct)
+    vectorstore.QdrantVectorStore().upsert(
+        collection_name(provider, len(vec)),
+        [vectorstore.Point(cid, vec, payload)],
     )
     if db.BACKEND != "postgres":
         conn.execute("DELETE FROM case_fts WHERE id = ?", (cid,))
@@ -138,15 +144,20 @@ def search(
     qvec, provider = embeddings.embed(query)
     by_id = {r["id"]: r for r in rows}
 
-    # 向量召回（同 provider 且同维度才可比）
-    vector_rank: list[str] = []
-    same = [r for r in rows if r["embed_provider"] == provider and r["dim"] == len(qvec)]
-    if same:
-        mat = np.vstack([unpack(r["embedding"]) for r in same])
-        q = np.array(qvec, dtype=np.float32)
-        scores = mat @ q
-        order = np.argsort(-scores)[:20]
-        vector_rank = [same[i]["id"] for i in order]
+    # 向量召回：集合按 provider + 维度隔离，结构化条件下推为 payload 过滤
+    store = vectorstore.QdrantVectorStore()
+    filters = {
+        key: value
+        for key, value in (("category", category), ("event_type", event_type))
+        if value
+    }
+    hits = store.search(
+        collection_name(provider, len(qvec)), qvec, top_k=20,
+        filters=filters or None,
+    )
+    if not hits and filters:
+        hits = store.search(collection_name(provider, len(qvec)), qvec, top_k=20)
+    vector_rank = [hit.id for hit in hits if hit.id in by_id]
 
     # 关键词召回
     keyword_rank: list[str] = []

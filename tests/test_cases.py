@@ -69,6 +69,16 @@ def test_embedding_falls_back_to_hash_without_llm():
     assert row["dim"] == 256
 
 
+def test_case_vector_is_stored_in_qdrant():
+    from app import embeddings, vectorstore
+
+    cid = make_case()
+    vec, provider = embeddings.embed("竞品大促前降价")
+    store = vectorstore.QdrantVectorStore()
+    hits = store.search(cases.collection_name(provider, len(vec)), vec, top_k=10)
+    assert cid in [hit.id for hit in hits]
+
+
 def test_agent_cites_retrieved_case(monkeypatch):
     monkeypatch.setattr(agent, "_llm_available", lambda: False)
     out = agent.analyze(
