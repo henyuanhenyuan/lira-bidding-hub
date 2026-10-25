@@ -1,3 +1,17 @@
+x-lira-env: &lira-env
+  LIRA_DATA_DIR: /data
+  LIRA_DATABASE_URL: postgresql://lira:lira@db:5432/lira
+  LIRA_REDIS_URL: redis://redis:6379/0
+  # 宿主机上的 Ollama；不可用时自动走模板
+  LIRA_OLLAMA_URL: http://host.docker.internal:11434
+  LIRA_OLLAMA_MODEL: qwen3:4b
+  LIRA_AUTH: "off"
+  LIRA_SCHEDULER: "celery"
+  LIRA_DIGEST_AT: "09:00"
+  LIRA_TZ: "Asia/Shanghai"
+  # LIRA_INGEST_TOKEN: change-me
+  # LIRA_WEBHOOK: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+
 services:
   db:
     image: postgres:16-alpine
@@ -16,24 +30,57 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   lira:
     build: .
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8010:8010"
-    environment:
-      LIRA_DATA_DIR: /data
-      LIRA_DATABASE_URL: postgresql://lira:lira@db:5432/lira
-      # 宿主机上的 Ollama；不可用时自动走模板
-      LIRA_OLLAMA_URL: http://host.docker.internal:11434
-      LIRA_OLLAMA_MODEL: qwen3:4b
-      LIRA_AUTH: "off"
-      LIRA_SCHEDULER: "on"
-      LIRA_DIGEST_AT: "09:00"
-      # LIRA_INGEST_TOKEN: change-me
-      # LIRA_WEBHOOK: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+    environment: *lira-env
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: celery -A app.celery_app worker --loglevel=info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *lira-env
+    volumes:
+      - ./data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  beat:
+    build: .
+    command: celery -A app.celery_app beat --loglevel=info
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: *lira-env
     volumes:
       - ./data:/data
     extra_hosts:

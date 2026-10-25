@@ -57,7 +57,10 @@ ollama pull qwen3:4b
 | `LIRA_OLLAMA_MODEL` | `qwen3:4b` | 模型名 |
 | `LIRA_LLM_TIMEOUT` | `20` | 单次调用超时（秒） |
 | `LIRA_LLM` | `auto` | `auto / off / on` |
-| `LIRA_SCHEDULER` | `on` | 后台调度开关 |
+| `LIRA_SCHEDULER` | `celery` | `celery / thread / off`；`thread` 仅为离线兜底，已弃用 |
+| `LIRA_REDIS_URL` | `redis://127.0.0.1:6379/0` | Celery broker 与 Redis 限流计数 |
+| `LIRA_CELERY_EAGER` | `0` | 测试用：`1` 时任务同步执行，不连 broker |
+| `LIRA_TZ` | `Asia/Shanghai` | Celery 时区 |
 | `LIRA_INBOX_INTERVAL` | `15` | 收件箱轮询间隔（秒） |
 | `LIRA_DIGEST_AT` | `09:00` | 每日摘要触发时间（本地时区） |
 | `LIRA_WEBHOOK` | 空 | 企业微信/钉钉机器人地址 |
@@ -125,7 +128,17 @@ data/            SQLite 与日志（运行时生成）
 
 ## 自动化与运维
 
-**后台调度**（进程内线程，无额外依赖）：
+**后台调度**（Celery beat，`LIRA_SCHEDULER=celery`）：
+
+本地不带容器时，需要先起 Redis，再分别启动 worker 与 beat；Windows 上 worker 只能用 `--pool=solo`：
+
+```bash
+celery -A app.celery_app worker --loglevel=info --pool=solo
+```
+
+```bash
+celery -A app.celery_app beat --loglevel=info
+```
 
 | 任务 | 频率 | 作用 |
 |---|---|---|

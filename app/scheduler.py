@@ -13,7 +13,8 @@ from . import (
 
 log = logging.getLogger(__name__)
 
-ENABLED = os.getenv("LIRA_SCHEDULER", "on") != "off"
+MODE = os.getenv("LIRA_SCHEDULER", "celery")  # celery | thread | off
+ENABLED = MODE != "off"
 SCAN_INTERVAL = float(os.getenv("LIRA_INBOX_INTERVAL", "15"))
 DIGEST_AT = os.getenv("LIRA_DIGEST_AT", "09:00")  # 本地时间 HH:MM
 
@@ -174,7 +175,7 @@ class Scheduler:
 
     def start(self) -> None:
         global _started_at
-        if not ENABLED:
+        if not ENABLED or MODE != "thread":
             return
         if self.thread.is_alive():
             return
@@ -197,6 +198,7 @@ def state() -> dict:
         ).fetchall()
     return {
         "enabled": ENABLED,
+        "mode": MODE,
         "started_at": _started_at,
         "last": dict(_last),
         "recent": [dict(r) for r in runs],
@@ -206,6 +208,8 @@ def state() -> dict:
 def run_now(kind: str) -> str:
     if kind == "digest":
         fn = job_digest
+    elif kind == "backup":
+        fn = job_backup
     elif kind in JOBS:
         fn = JOBS[kind][1]
     else:

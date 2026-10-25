@@ -4,6 +4,7 @@ import tempfile
 os.environ.setdefault("LIRA_DATA_DIR", tempfile.mkdtemp(prefix="lira-test-"))
 os.environ["LIRA_LLM"] = "off"
 os.environ["LIRA_SCHEDULER"] = "off"
+os.environ["LIRA_CELERY_EAGER"] = "1"
 os.environ["LIRA_AUTH"] = "off"
 
 TEST_BACKEND = os.getenv("LIRA_TEST_DB", "sqlite")
