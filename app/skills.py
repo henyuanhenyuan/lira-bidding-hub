@@ -6,6 +6,8 @@ from typing import Any
 from . import db
 
 SEVERITY_ORDER = {"L1": 1, "L2": 2, "L3": 3}
+STAGES = ("steward", "planning", "tools", "analyst", "risk", "verification", "writer")
+DEFAULT_STAGES = STAGES
 ALL_TOOLS = [
     "collection_health",
     "price_history",
@@ -24,6 +26,8 @@ DEFAULT_SKILL = {
     "min_severity": "L1",
     "playbook": "先确认数据可信，再看价格趋势与历史案例；不确认的动作一律先观察。",
     "allowed_tools": ALL_TOOLS,
+    "stages": list(DEFAULT_STAGES),
+    "output_schema": None,
     "version": 1,
     "enabled": 1,
 }
@@ -79,6 +83,13 @@ BUILTIN = [
 ]
 
 
+def _validate_stages(stages: list[str]) -> list[str]:
+    unknown = [item for item in stages if item not in STAGES]
+    if unknown:
+        raise ValueError(f"未知阶段：{', '.join(unknown)}")
+    return list(stages)
+
+
 def _row(row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -88,6 +99,8 @@ def _row(row) -> dict[str, Any]:
         "min_severity": row["min_severity"],
         "playbook": row["playbook"],
         "allowed_tools": db.loads(row["allowed_tools"], []),
+        "stages": db.loads(row["stages"], []) or list(DEFAULT_STAGES),
+        "output_schema": db.loads(row["output_schema"], None),
         "version": row["version"],
         "enabled": row["enabled"],
         "created_at": row["created_at"],
@@ -103,13 +116,16 @@ def ensure_seeded(conn) -> None:
         now = db.now_iso()
         conn.execute(
             "INSERT INTO skill (id, name, description, event_types, min_severity,"
-            " playbook, allowed_tools, version, enabled, created_at, updated_at)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            " playbook, allowed_tools, stages, output_schema, version, enabled,"
+            " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 item["id"], item["name"], item["description"],
                 json.dumps(item["event_types"], ensure_ascii=False),
                 item["min_severity"], item["playbook"],
                 json.dumps(item["allowed_tools"], ensure_ascii=False),
+                json.dumps(item.get("stages") or DEFAULT_STAGES, ensure_ascii=False),
+                json.dumps(item.get("output_schema"), ensure_ascii=False)
+                if item.get("output_schema") is not None else None,
                 1, 1, now, now,
             ),
         )
@@ -154,6 +170,8 @@ def create_skill(
     description: str | None = None,
     min_severity: str = "L1",
     enabled: bool = True,
+    stages: list[str] | None = None,
+    output_schema: dict | None = None,
 ) -> dict[str, Any]:
     if not name.strip() or not playbook.strip():
         raise ValueError("name 和 playbook 不能为空")
@@ -162,16 +180,19 @@ def create_skill(
     unknown = [item for item in allowed_tools if item not in ALL_TOOLS]
     if unknown:
         raise ValueError(f"未知工具：{', '.join(unknown)}")
+    stage_list = _validate_stages(stages or list(DEFAULT_STAGES))
     skill_id = db.new_id()
     now = db.now_iso()
     conn.execute(
         "INSERT INTO skill (id, name, description, event_types, min_severity, playbook,"
-        " allowed_tools, version, enabled, created_at, updated_at)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        " allowed_tools, stages, output_schema, version, enabled, created_at, updated_at)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             skill_id, name.strip(), description,
             json.dumps(event_types, ensure_ascii=False), min_severity,
             playbook.strip(), json.dumps(allowed_tools, ensure_ascii=False),
+            json.dumps(stage_list, ensure_ascii=False),
+            json.dumps(output_schema, ensure_ascii=False) if output_schema else None,
             1, int(enabled), now, now,
         ),
     )
@@ -181,7 +202,7 @@ def create_skill(
 
 def update_skill(conn, skill_id: str, changes: dict[str, Any]) -> dict[str, Any]:
     allowed = {"name", "description", "event_types", "min_severity", "playbook",
-               "allowed_tools", "enabled"}
+               "allowed_tools", "enabled", "stages", "output_schema"}
     updates = {key: value for key, value in changes.items() if key in allowed}
     if not updates:
         raise ValueError("没有可更新的字段")
@@ -191,11 +212,13 @@ def update_skill(conn, skill_id: str, changes: dict[str, Any]) -> dict[str, Any]
             raise ValueError(f"未知工具：{', '.join(unknown)}")
     if "min_severity" in updates and updates["min_severity"] not in SEVERITY_ORDER:
         raise ValueError("min_severity 只能是 L1/L2/L3")
+    if "stages" in updates:
+        updates["stages"] = _validate_stages(updates["stages"])
 
     sets = []
     params: list[Any] = []
     for key, value in updates.items():
-        if key in ("event_types", "allowed_tools"):
+        if key in ("event_types", "allowed_tools", "stages", "output_schema"):
             value = json.dumps(value, ensure_ascii=False)
         if key == "enabled":
             value = int(bool(value))

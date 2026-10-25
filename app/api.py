@@ -382,6 +382,8 @@ class SkillIn(BaseModel):
     description: str | None = None
     min_severity: str = "L1"
     enabled: bool = True
+    stages: list[str] | None = None
+    output_schema: dict[str, Any] | None = None
 
 
 @router.post("/api/skills")
@@ -400,6 +402,8 @@ def create_skill(
                 description=body.description,
                 min_severity=body.min_severity,
                 enabled=body.enabled,
+                stages=body.stages,
+                output_schema=body.output_schema,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -413,6 +417,8 @@ class SkillPatch(BaseModel):
     playbook: str | None = None
     allowed_tools: list[str] | None = None
     enabled: bool | None = None
+    stages: list[str] | None = None
+    output_schema: dict[str, Any] | None = None
 
 
 @router.patch("/api/skills/{skill_id}")

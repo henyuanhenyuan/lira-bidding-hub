@@ -284,6 +284,8 @@ CREATE TABLE IF NOT EXISTS skill (
   min_severity TEXT,
   playbook TEXT NOT NULL,
   allowed_tools TEXT NOT NULL DEFAULT '[]',
+  stages TEXT NOT NULL DEFAULT '[]',
+  output_schema TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
@@ -545,6 +547,8 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "suggestion", "guardrail_note", "TEXT")
     _ensure_column(conn, "doc_chunk", "parent_id", "TEXT")
     _ensure_column(conn, "doc_chunk", "level", "TEXT NOT NULL DEFAULT 'child'")
+    _ensure_column(conn, "skill", "stages", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(conn, "skill", "output_schema", "TEXT")
     # 向量已迁到 Qdrant，旧库里的 embedding 列不再写入
     _drop_column(conn, "case", "embedding")
     _drop_column(conn, "doc_chunk", "embedding")
