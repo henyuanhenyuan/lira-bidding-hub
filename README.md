@@ -61,6 +61,11 @@ ollama pull qwen3:4b
 | `LIRA_REDIS_URL` | `redis://127.0.0.1:6379/0` | Celery broker 与 Redis 限流计数 |
 | `LIRA_CELERY_EAGER` | `0` | 测试用：`1` 时任务同步执行，不连 broker |
 | `LIRA_TZ` | `Asia/Shanghai` | Celery 时区 |
+| `LIRA_COLLECT_INTERVAL` | `15` | 采集调度间隔（秒） |
+| `LIRA_RL_RATE` | `0.2` | 令牌桶每秒补充数 |
+| `LIRA_RL_CAPACITY` | `1` | 令牌桶容量（突发上限） |
+| `LIRA_COLLECT_ACCOUNT` | `default` | 未在任务上指定账号时的默认值 |
+| `LIRA_COLLECT_SHOP` | `default` | 未在任务上指定店铺时的默认值 |
 | `LIRA_INBOX_INTERVAL` | `15` | 收件箱轮询间隔（秒） |
 | `LIRA_DIGEST_AT` | `09:00` | 每日摘要触发时间（本地时区） |
 | `LIRA_WEBHOOK` | 空 | 企业微信/钉钉机器人地址 |
@@ -151,6 +156,24 @@ celery -A app.celery_app beat --loglevel=info
 
 **文件收件箱**：把影刀导出的 CSV/JSON 丢进 `data/inbox/` 即可，
 按内容哈希判重，同名同内容不会重复入库。手动扫描：`POST /api/ops/inbox-scan`。
+
+**采集通道与风控**：
+
+| 通道 | 实现 | tier | 说明 |
+|---|---|---|---|
+| `api` | 官方 / 授权接口 | T0 / T1 | 配置 `LIRA_CONNECTOR_URL` 后按任务下发 |
+| `rpa` | 影刀 | T2 | 写工单到 `data/collect_outbox/`，由影刀计划任务消费 |
+| `manual` | 人工文件 | T2 / T3 | 等待投递到 `data/inbox/` |
+
+调度每 15 秒领取到期任务，顺序固定为 **熔断 → 令牌桶 → 下发**：
+
+- 令牌桶按「通道 × 账号 × 店铺」三维；`LIRA_RL_RATE` 每秒补充、`LIRA_RL_CAPACITY` 为容量
+- 连续失败达到阈值即熔断；冷却后放行一次探测，成功即闭合
+- 熔断期间的任务进入人工复核队列，不会被静默丢弃
+- 每次请求写入 `collect_log`：`GET /api/collect/logs`、`GET /api/collect/summary`
+- 复核队列：`GET /api/collect/reviews`、`POST /api/collect/reviews/{id}/resolve?decision=released|discarded`
+
+任务生命周期止于「下发完成」；采集结果仍通过 ingest 契约回来，按 target 与时间对齐。
 
 ## SKU 对齐
 
