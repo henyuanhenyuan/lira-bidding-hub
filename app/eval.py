@@ -179,6 +179,14 @@ def _cleanup(run_key: str, target_ids: list[str]) -> None:
         conn.execute("DELETE FROM ingest_log WHERE source = ?", (f"eval:{run_key}",))
 
 
+def _trace_kinds(run_id: str) -> list[str]:
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT kind FROM agent_step WHERE run_id = ? ORDER BY seq", (run_id,)
+        ).fetchall()
+    return [row["kind"] for row in rows]
+
+
 def run(limit: int | None = None) -> dict[str, Any]:
     with db.get_db() as conn:
         ensure_cases(conn)
@@ -265,10 +273,15 @@ def run(limit: int | None = None) -> dict[str, Any]:
         evidence = db.loads(event_row["evidence"], []) if event_row else []
 
         actual_action = suggestion["action"] if suggestion else None
+        trace = _trace_kinds(suggestion["agent_run_id"]) if suggestion else []
+        trace_ok = {"steward", "analysis", "risk", "verify", "writer"}.issubset(
+            set(trace)
+        )
         passed = bool(
             suggestion
             and actual_action == case["expected_action"]
             and evidence
+            and trace_ok
         )
         results.append(
             {
@@ -280,6 +293,7 @@ def run(limit: int | None = None) -> dict[str, Any]:
                 "actual_action": actual_action,
                 "evidence_count": len(evidence),
                 "guardrail": suggestion.get("guardrail") if suggestion else None,
+                "trace_ok": trace_ok,
                 "latency_ms": latency,
                 "error": error,
             }
