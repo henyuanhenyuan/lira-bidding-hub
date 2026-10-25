@@ -270,8 +270,9 @@ CREATE TABLE IF NOT EXISTS doc_chunk (
   content TEXT NOT NULL,
   embed_provider TEXT NOT NULL,
   dim INTEGER NOT NULL,
-  embedding BLOB NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  parent_id TEXT,
+  level TEXT NOT NULL DEFAULT 'child'
 );
 CREATE INDEX IF NOT EXISTS ix_doc_chunk_doc ON doc_chunk(doc_id, chunk_no);
 
@@ -542,8 +543,11 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "suggestion", "margin_floor", "REAL")
     _ensure_column(conn, "suggestion", "guardrail", "TEXT DEFAULT 'unknown'")
     _ensure_column(conn, "suggestion", "guardrail_note", "TEXT")
+    _ensure_column(conn, "doc_chunk", "parent_id", "TEXT")
+    _ensure_column(conn, "doc_chunk", "level", "TEXT NOT NULL DEFAULT 'child'")
     # 向量已迁到 Qdrant，旧库里的 embedding 列不再写入
     _drop_column(conn, "case", "embedding")
+    _drop_column(conn, "doc_chunk", "embedding")
     _ensure_column(conn, "suggestion", "executed_price", "REAL")
     _ensure_column(conn, "suggestion", "submitted_by", "TEXT")
     _ensure_column(conn, "suggestion", "approved_by", "TEXT")

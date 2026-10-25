@@ -26,6 +26,37 @@ def test_split_text_respects_size_and_heading():
     assert chunks[0].startswith("# 大促价保规则")
 
 
+LONG_CONTENT = "\n\n".join(
+    f"## 第 {i} 条规则\n\n" + "竞品价格变动需要结合活动类型判断，" * 12
+    for i in range(1, 7)
+)
+
+
+def test_hierarchy_has_parents_and_children():
+    with db.get_db() as conn:
+        doc = docs.create_doc(conn, title="长规则", content=LONG_CONTENT)
+        rows = conn.execute(
+            "SELECT id, level, parent_id FROM doc_chunk WHERE doc_id = ?"
+            " ORDER BY chunk_no",
+            (doc["id"],),
+        ).fetchall()
+    parents = [row for row in rows if row["level"] == "parent"]
+    children = [row for row in rows if row["level"] == "child"]
+    assert parents
+    assert children
+    parent_ids = {row["id"] for row in parents}
+    assert all(child["parent_id"] in parent_ids for child in children)
+
+
+def test_search_returns_parent_context():
+    with db.get_db() as conn:
+        docs.create_doc(conn, title="长规则", content=LONG_CONTENT)
+        found = docs.search_docs(conn, "竞品价格变动 活动类型", limit=3)
+    assert found
+    assert found[0]["parent_content"]
+    assert len(found[0]["parent_content"]) >= len(found[0]["content"])
+
+
 def test_create_and_search_doc():
     with db.get_db() as conn:
         doc = docs.create_doc(

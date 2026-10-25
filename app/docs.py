@@ -1,70 +1,72 @@
 from __future__ import annotations
 
-import re
-import struct
 from typing import Any
 
-import numpy as np
+from llama_index.core.node_parser import (
+    HierarchicalNodeParser,
+    SentenceSplitter,
+    get_leaf_nodes,
+)
+from llama_index.core.schema import Document as LIDocument
+from llama_index.core.schema import NodeRelationship
 
-from . import db, embeddings
+from . import db, embeddings, vectorstore
 
 MAX_CHARS = 500
 OVERLAP = 80
+PARENT_CHARS = 1200
+CHILD_CHARS = 300
 RRF_K = 60
 
 
-def split_text(text: str, max_chars: int = MAX_CHARS, overlap: int = OVERLAP) -> list[str]:
-    """按段落切分，超长段落再按窗口切，窗口间保留 overlap 字符。"""
-    normalized = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+def _normalize(text: str) -> str:
+    return (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def split_text(
+    text: str, max_chars: int = MAX_CHARS, overlap: int = OVERLAP
+) -> list[str]:
+    normalized = _normalize(text)
     if not normalized:
         return []
-
-    raw_blocks = [block.strip() for block in re.split(r"\n\s*\n", normalized) if block.strip()]
-    blocks: list[str] = []
-    pending = ""
-    for block in raw_blocks:
-        # 标题或短行与下一段合并，避免出现只有标题的切片
-        if block.startswith("#") or len(block) < 40:
-            pending = f"{pending}\n\n{block}".strip() if pending else block
-            continue
-        blocks.append(f"{pending}\n\n{block}".strip() if pending else block)
-        pending = ""
-    if pending:
-        blocks.append(pending)
-
-    chunks: list[str] = []
-    current = ""
-    step = max(1, max_chars - overlap)
-    for block in blocks:
-        if len(block) > max_chars:
-            if current:
-                chunks.append(current)
-                current = ""
-            start = 0
-            while start < len(block):
-                piece = block[start : start + max_chars].strip()
-                if piece:
-                    chunks.append(piece)
-                start += step
-        else:
-            candidate = f"{current}\n\n{block}".strip() if current else block
-            if len(candidate) <= max_chars:
-                current = candidate
-            else:
-                if current:
-                    chunks.append(current)
-                current = block
-    if current:
-        chunks.append(current)
-    return chunks
+    splitter = SentenceSplitter(chunk_size=max_chars, chunk_overlap=overlap)
+    return [chunk.strip() for chunk in splitter.split_text(normalized) if chunk.strip()]
 
 
-def _pack(vec: list[float]) -> bytes:
-    return struct.pack(f"{len(vec)}f", *vec)
+def split_hierarchy(
+    text: str,
+    parent_chars: int = PARENT_CHARS,
+    child_chars: int = CHILD_CHARS,
+    overlap: int = 60,
+) -> list[dict[str, Any]]:
+    """父块按小节、子块按句群。子块用于召回，父块用于喂模型。"""
+    normalized = _normalize(text)
+    if not normalized:
+        return []
+    parser = HierarchicalNodeParser.from_defaults(
+        chunk_sizes=[parent_chars, child_chars], chunk_overlap=overlap
+    )
+    nodes = parser.get_nodes_from_documents([LIDocument(text=normalized)])
+    leaf_ids = {node.node_id for node in get_leaf_nodes(nodes)}
+    local_ids = {node.node_id: db.new_id() for node in nodes}
+
+    out: list[dict[str, Any]] = []
+    for node in nodes:
+        parent = node.relationships.get(NodeRelationship.PARENT)
+        out.append(
+            {
+                "id": local_ids[node.node_id],
+                "text": node.get_content().strip(),
+                "level": "child" if node.node_id in leaf_ids else "parent",
+                "parent_id": local_ids.get(parent.node_id) if parent else None,
+            }
+        )
+    return out
 
 
-def _unpack(blob: bytes) -> np.ndarray:
-    return np.frombuffer(blob, dtype=np.float32)
+def collection_name(provider: str, dim: int) -> str:
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in provider)
+    return f"doc_chunks_{safe}_{dim}"
 
 
 def create_doc(
@@ -76,14 +78,9 @@ def create_doc(
     category: str | None = None,
     version: str | None = None,
 ) -> dict[str, Any]:
-    chunks = split_text(content)
-    if not chunks:
+    nodes = split_hierarchy(content)
+    if not nodes:
         raise ValueError("文档内容为空")
-
-    prepared: list[tuple[int, str, str, list[float]]] = []
-    for index, chunk in enumerate(chunks):
-        vector, provider = embeddings.embed(chunk)
-        prepared.append((index, chunk, provider, vector))
 
     doc_id = db.new_id()
     conn.execute(
@@ -91,15 +88,37 @@ def create_doc(
         " VALUES (?,?,?,?,?,?)",
         (doc_id, title.strip(), source, category, version, db.now_iso()),
     )
-    for index, chunk, provider, vector in prepared:
+
+    batches: dict[str, list[vectorstore.Point]] = {}
+    now = db.now_iso()
+    for index, node in enumerate(nodes):
+        vector, provider = embeddings.embed(node["text"])
         conn.execute(
             "INSERT INTO doc_chunk (id, doc_id, chunk_no, content, embed_provider,"
-            " dim, embedding, created_at) VALUES (?,?,?,?,?,?,?,?)",
+            " dim, created_at, parent_id, level) VALUES (?,?,?,?,?,?,?,?,?)",
             (
-                db.new_id(), doc_id, index, chunk, provider, len(vector),
-                _pack(vector), db.now_iso(),
+                node["id"], doc_id, index, node["text"], provider, len(vector),
+                now, node["parent_id"], node["level"],
             ),
         )
+        if node["level"] != "child":
+            continue
+        key = collection_name(provider, len(vector))
+        batches.setdefault(key, []).append(
+            vectorstore.Point(
+                node["id"],
+                vector,
+                {
+                    "doc_id": doc_id,
+                    "chunk_no": index,
+                    "parent_id": node["parent_id"] or "",
+                },
+            )
+        )
+
+    store = vectorstore.QdrantVectorStore()
+    for name, points in batches.items():
+        store.upsert(name, points)
     return get_doc(conn, doc_id)
 
 
@@ -108,8 +127,8 @@ def get_doc(conn, doc_id: str) -> dict[str, Any] | None:
     if not doc:
         return None
     chunks = conn.execute(
-        "SELECT id, chunk_no, content FROM doc_chunk WHERE doc_id = ?"
-        " ORDER BY chunk_no",
+        "SELECT id, chunk_no, content, level, parent_id FROM doc_chunk"
+        " WHERE doc_id = ? ORDER BY chunk_no",
         (doc_id,),
     ).fetchall()
     return {**dict(doc), "chunks": [dict(row) for row in chunks], "chunk_count": len(chunks)}
@@ -128,7 +147,8 @@ def list_docs(conn) -> list[dict[str, Any]]:
 
 def get_chunk(conn, chunk_id: str) -> dict[str, Any] | None:
     row = conn.execute(
-        "SELECT c.id, c.doc_id, c.chunk_no, c.content, d.title AS doc_title"
+        "SELECT c.id, c.doc_id, c.chunk_no, c.content, c.level, c.parent_id,"
+        " d.title AS doc_title"
         " FROM doc_chunk c JOIN doc d ON d.id = c.doc_id WHERE c.id = ?",
         (chunk_id,),
     ).fetchone()
@@ -140,30 +160,28 @@ def search_docs(conn, query: str, limit: int = 3) -> list[dict[str, Any]]:
     if not text:
         return []
     rows = conn.execute(
-        "SELECT c.id, c.doc_id, c.chunk_no, c.content, c.embed_provider, c.dim,"
-        " c.embedding, d.title AS doc_title"
-        " FROM doc_chunk c JOIN doc d ON d.id = c.doc_id"
+        "SELECT c.id, c.doc_id, c.chunk_no, c.content, c.parent_id, c.level,"
+        " d.title AS doc_title"
+        " FROM doc_chunk c JOIN doc d ON d.id = c.doc_id WHERE c.level = 'child'"
     ).fetchall()
     if not rows:
         return []
+    by_id = {row["id"]: row for row in rows}
 
     qvec, provider = embeddings.embed(text)
-    same = [row for row in rows if row["embed_provider"] == provider and row["dim"] == len(qvec)]
-    vector_rank: list[str] = []
-    if same:
-        matrix = np.vstack([_unpack(row["embedding"]) for row in same])
-        query_vec = np.array(qvec, dtype=np.float32)
-        scores = matrix @ query_vec
-        order = np.argsort(-scores)[:20]
-        vector_rank = [same[int(i)]["id"] for i in order]
+    hits = vectorstore.QdrantVectorStore().search(
+        collection_name(provider, len(qvec)), qvec, top_k=20
+    )
+    vector_rank = [hit.id for hit in hits if hit.id in by_id]
 
     keyword_rank: list[str] = []
     try:
         keyword_rows = conn.execute(
-            "SELECT id FROM doc_chunk WHERE content LIKE ? LIMIT 20",
+            "SELECT id FROM doc_chunk WHERE level = 'child' AND content LIKE ?"
+            " LIMIT 20",
             (f"%{text[:60]}%",),
         ).fetchall()
-        keyword_rank = [row["id"] for row in keyword_rows]
+        keyword_rank = [row["id"] for row in keyword_rows if row["id"] in by_id]
     except Exception:
         keyword_rank = []
 
@@ -173,11 +191,23 @@ def search_docs(conn, query: str, limit: int = 3) -> list[dict[str, Any]]:
     for rank, chunk_id in enumerate(keyword_rank):
         fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (RRF_K + rank + 1)
 
-    by_id = {row["id"]: row for row in rows}
     if not fused:
-        ordered = rows[:limit]
+        ordered = list(by_id.values())[:limit]
     else:
-        ordered = [by_id[chunk_id] for chunk_id in sorted(fused, key=lambda key: -fused[key])[:limit]]
+        ordered = [
+            by_id[chunk_id]
+            for chunk_id in sorted(fused, key=lambda key: -fused[key])[:limit]
+        ]
+
+    parent_ids = {row["parent_id"] for row in ordered if row["parent_id"]}
+    parents: dict[str, str] = {}
+    if parent_ids:
+        placeholders = ",".join("?" for _ in parent_ids)
+        for row in conn.execute(
+            f"SELECT id, content FROM doc_chunk WHERE id IN ({placeholders})",
+            tuple(parent_ids),
+        ).fetchall():
+            parents[row["id"]] = row["content"]
 
     return [
         {
@@ -186,6 +216,7 @@ def search_docs(conn, query: str, limit: int = 3) -> list[dict[str, Any]]:
             "doc_title": row["doc_title"],
             "chunk_no": row["chunk_no"],
             "content": row["content"],
+            "parent_content": parents.get(row["parent_id"], row["content"]),
             "score": round(fused.get(row["id"], 0.0), 4),
         }
         for row in ordered
