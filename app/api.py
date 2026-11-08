@@ -13,7 +13,6 @@ from .routers import docs
 from .routers import skills
 from .routers import evaluation
 from .routers import suggestions
-from .routers import ask
 from .routers import auth_users
 from .routers import collect
 from .routers import ops
@@ -30,7 +29,6 @@ for sub in (
     skills.router,
     evaluation.router,
     suggestions.router,
-    ask.router,
     auth_users.router,
     collect.router,
     ops.router,

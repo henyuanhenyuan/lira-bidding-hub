@@ -1,46 +1,54 @@
+import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
-import { useAuth } from "./auth";
-import Layout from "./components/Layout";
-import Admin from "./pages/Admin";
-import AgentRuns from "./pages/AgentRuns";
-import AgentTrace from "./pages/AgentTrace";
+import { api } from "./core/api";
+import { useAuth } from "./core/auth";
+import { Shell } from "./ui/kit";
+
 import Approvals from "./pages/Approvals";
-import Ask from "./pages/Ask";
-import Cases from "./pages/Cases";
-import CollectLogs from "./pages/CollectLogs";
-import Collection from "./pages/Collection";
-import CompetitorDetail from "./pages/CompetitorDetail";
-import Competitors from "./pages/Competitors";
-import Docs from "./pages/Docs";
-import EvalPage from "./pages/EvalPage";
+import Eval from "./pages/Eval";
 import EventDetail from "./pages/EventDetail";
 import Events from "./pages/Events";
-import ImportPage from "./pages/ImportPage";
-import Skills from "./pages/Skills";
+import Knowledge from "./pages/Knowledge";
 import Login from "./pages/Login";
-import Mappings from "./pages/Mappings";
-import NotFound from "./pages/NotFound";
 import Observability from "./pages/Observability";
-import Reviews from "./pages/Reviews";
-import Targets from "./pages/Targets";
-import Outcomes from "./pages/Outcomes";
 import Overview from "./pages/Overview";
+import RunDetail from "./pages/RunDetail";
+import Runs from "./pages/Runs";
+import Settings from "./pages/Settings";
 import SuggestionDetail from "./pages/SuggestionDetail";
 import Suggestions from "./pages/Suggestions";
+import Targets from "./pages/Targets";
+import Tools from "./pages/Tools";
+
+function Boot() {
+  return <div className="loader">正在载入工作台…</div>;
+}
 
 function RequireAuth() {
   const { me, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="boot-screen">
-        <div className="boot-mark">竞</div>
-        <span>正在载入工作台…</span>
-      </div>
-    );
-  }
+  if (loading) return <Boot />;
   if (!me) return <Navigate to="/login" replace />;
   return <Outlet />;
+}
+
+function Layout() {
+  const [pending, setPending] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get<unknown[]>("/api/approvals/inbox")
+      .then((rows) => alive && setPending(rows.length))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return (
+    <Shell pending={pending}>
+      <Outlet />
+    </Shell>
+  );
 }
 
 export default function App() {
@@ -52,28 +60,18 @@ export default function App() {
           <Route index element={<Overview />} />
           <Route path="events" element={<Events />} />
           <Route path="events/:id" element={<EventDetail />} />
-          <Route path="competitors" element={<Competitors />} />
-          <Route path="competitors/:id" element={<CompetitorDetail />} />
           <Route path="suggestions" element={<Suggestions />} />
           <Route path="suggestions/:id" element={<SuggestionDetail />} />
           <Route path="approvals" element={<Approvals />} />
-          <Route path="outcomes" element={<Outcomes />} />
-          <Route path="cases" element={<Cases />} />
-          <Route path="reviews" element={<Reviews />} />
-          <Route path="targets" element={<Targets />} />
-          <Route path="mappings" element={<Mappings />} />
-          <Route path="docs" element={<Docs />} />
-          <Route path="ask" element={<Ask />} />
-          <Route path="agent" element={<AgentRuns />} />
-          <Route path="agent/:id" element={<AgentTrace />} />
-          <Route path="skills" element={<Skills />} />
-          <Route path="eval" element={<EvalPage />} />
+          <Route path="runs" element={<Runs />} />
+          <Route path="runs/:id" element={<RunDetail />} />
+          <Route path="knowledge" element={<Knowledge />} />
+          <Route path="tools" element={<Tools />} />
+          <Route path="eval" element={<Eval />} />
           <Route path="observability" element={<Observability />} />
-          <Route path="collection" element={<Collection />} />
-          <Route path="collect-logs" element={<CollectLogs />} />
-          <Route path="import" element={<ImportPage />} />
-          <Route path="admin" element={<Admin />} />
-          <Route path="*" element={<NotFound />} />
+          <Route path="targets" element={<Targets />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>
     </Routes>

@@ -3,11 +3,9 @@ from __future__ import annotations
 from .api import ApiAdapter
 from .base import ChannelAdapter, DispatchResult
 from .manual import ManualAdapter
-from .yingdao import YingdaoAdapter
 
 _ADAPTERS: dict[str, type[ChannelAdapter]] = {
     "api": ApiAdapter,
-    "rpa": YingdaoAdapter,
     "manual": ManualAdapter,
 }
 
@@ -25,6 +23,5 @@ __all__ = [
     "ChannelAdapter",
     "DispatchResult",
     "ManualAdapter",
-    "YingdaoAdapter",
     "get_adapter",
 ]

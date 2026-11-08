@@ -11,8 +11,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": "http://127.0.0.1:8010",
-      "/v1": "http://127.0.0.1:8010",
+      "/api": "http://127.0.0.1:8011",
+      "/v1": "http://127.0.0.1:8011",
     },
   },
 });

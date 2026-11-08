@@ -1,77 +1,74 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
-import { api } from "../api";
-import SuggestionActions from "../components/SuggestionActions";
-import {
-  Empty,
-  ErrorBox,
-  GuardrailBadge,
-  Loader,
-  PageHead,
-  StatusBadge,
-} from "../components/ui";
-import { formatTs, percent } from "../format";
-import { useAsync, useStreamEvent } from "../hooks";
-import { ACTION_TEXT } from "../labels";
-import type { Suggestion } from "../types";
+import { api, ApiError } from "../core/api";
+import { money, pct } from "../core/format";
+import { useAsync } from "../core/hooks";
+import type { Suggestion } from "../core/types";
+import { Badge, Card, Empty, ErrorBox, Page, Spinner, Table, actionText } from "../ui/kit";
 
 export default function Approvals() {
   const { data, error, loading, reload } = useAsync(
     () => api.get<Suggestion[]>("/api/approvals/inbox"),
     [],
   );
-  useStreamEvent(["approval", "event"], () => void reload());
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState("");
+
+  async function approve(item: Suggestion) {
+    setBusy(item.id);
+    setMessage("");
+    try {
+      await api.post(`/api/suggestions/${item.id}/approve`, {});
+      setMessage(`已批准：${item.target_title ?? item.event_id}`);
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof ApiError ? err.message : "审批失败");
+    } finally {
+      setBusy("");
+    }
+  }
 
   return (
-    <>
-      <PageHead
-        title="审批"
-        sub="批准后运营才能执行；审批记录会进入时间线"
-        actions={
-          <button className="btn ghost" onClick={() => void reload()}>
-            刷新
-          </button>
-        }
-      />
+    <Page title="待审批" desc="提交后的建议进入这里，必须由有权角色确认才能执行">
+      {message && <div className="notice">{message}</div>}
+      {error && <ErrorBox message={error} />}
 
-      {error && <ErrorBox message={error} onRetry={reload} />}
-      {loading && !data && <Loader />}
-      {data && data.length === 0 && <Empty>没有待审批的建议。</Empty>}
-
-      <div className="approval-grid">
-        {data?.map((item) => (
-          <article className="card approval-card" key={item.id}>
-            <div className="approval-head">
-              <StatusBadge value={item.status} />
-              <GuardrailBadge value={item.guardrail} />
-              <span className="hint">
-                {item.target_title || item.target_id} · 提交人 {item.submitted_by || "—"}
-              </span>
-              <span className="approval-margin">
-                毛利 {item.margin_at_target == null ? "—" : percent(item.margin_at_target, 1)}
-              </span>
-            </div>
-
-            <h3>
-              <Link to={`/suggestions/${item.id}`}>
-                {ACTION_TEXT[item.action] ?? item.action}
-              </Link>
-            </h3>
-            <p className="narrative">{item.narrative}</p>
-            <div className="approval-meta">
-              <span>置信 {percent(item.confidence)}</span>
-              <span>{formatTs(item.created_at)}</span>
-              {item.impact_low != null && item.impact_high != null && (
-                <span>
-                  价差 ¥{item.impact_low.toFixed(2)} ~ ¥{item.impact_high.toFixed(2)}
-                </span>
-              )}
-            </div>
-
-            <SuggestionActions suggestion={item} onChange={reload} />
-          </article>
-        ))}
-      </div>
-    </>
+      <Card flush>
+        {loading && !data ? (
+          <Spinner />
+        ) : (data ?? []).length === 0 ? (
+          <Empty>没有待审批的建议。</Empty>
+        ) : (
+          <Table head={["动作", "竞品", "置信度", "护栏", "目标价", "操作"]}>
+            {(data ?? []).map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <Link to={`/suggestions/${item.id}`}>
+                    <b>{actionText(item.action)}</b>
+                  </Link>
+                  <div className="sub">{item.narrative.slice(0, 40)}…</div>
+                </td>
+                <td>{item.target_title ?? "—"}</td>
+                <td className="num">{pct(item.confidence)}</td>
+                <td>
+                  <Badge tone={item.guardrail === "blocked" ? "danger" : "ok"}>{item.guardrail}</Badge>
+                </td>
+                <td className="num">{money(item.target_price)}</td>
+                <td>
+                  <button
+                    className="btn sm"
+                    disabled={busy === item.id}
+                    onClick={() => void approve(item)}
+                  >
+                    {busy === item.id ? "处理中…" : "批准"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+    </Page>
   );
 }

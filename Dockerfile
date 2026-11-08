@@ -26,6 +26,6 @@ ENV LIRA_DATA_DIR=/data \
     LIRA_LLM=auto
 
 VOLUME ["/data"]
-EXPOSE 8010
+EXPOSE 8011
 
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011"]

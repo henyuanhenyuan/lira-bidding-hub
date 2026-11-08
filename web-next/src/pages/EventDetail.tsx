@@ -1,202 +1,140 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api } from "../api";
-import PriceChart from "../components/PriceChart";
-import SuggestionActions from "../components/SuggestionActions";
-import {
-  Card,
-  Empty,
-  ErrorBox,
-  GateBadge,
-  GuardrailBadge,
-  KV,
-  Loader,
-  PageHead,
-  SeverityBadge,
-  StatusBadge,
-} from "../components/ui";
-import { formatTs, money, percent } from "../format";
-import { useAsync } from "../hooks";
-import { ACTION_TEXT, TYPE_TEXT } from "../labels";
-import type { EventDetail as EventDetailType, PricePoint } from "../types";
+import { api, ApiError } from "../core/api";
+import { money, pct, ts } from "../core/format";
+import { useAsync } from "../core/hooks";
+import type { EventDetail as EventDetailType, Suggestion } from "../core/types";
+import { Badge, Card, Empty, ErrorBox, Page, SeverityBadge, Spinner, StatusBadge, actionText } from "../ui/kit";
 
 export default function EventDetail() {
-  const { id } = useParams<{ id: string }>();
-  const [analyzing, setAnalyzing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  const { data, error, loading, reload } = useAsync(async () => {
-    const event = await api.get<EventDetailType>(`/api/events/${id}`);
-    const prices = await api.get<PricePoint[]>(
-      `/api/targets/${encodeURIComponent(event.target_id)}/prices`,
-    );
-    return { event, prices };
-  }, [id]);
-
-  if (loading && !data) return <Loader label="载入事件…" />;
-  if (error && !data) return <ErrorBox message={error} onRetry={reload} />;
-  if (!data) return null;
-
-  const { event, prices } = data;
-  const suggestion = event.suggestion;
-  const latest = prices[0];
-  const observe = event.gate_level === "observe";
+  const { id = "" } = useParams();
+  const { data, error, loading, reload } = useAsync(
+    () => api.get<EventDetailType>(`/api/events/${encodeURIComponent(id)}`),
+    [id],
+  );
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
 
   async function analyze() {
-    setAnalyzing(true);
-    setActionError(null);
+    setBusy(true);
+    setMessage("");
     try {
-      await api.post(`/api/events/${id}/analyze`);
+      const suggestion = await api.post<Suggestion>(`/api/events/${encodeURIComponent(id)}/analyze`);
+      setMessage(`研判完成：${actionText(suggestion.action)}（${suggestion.generated_by}）`);
       await reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "研判失败");
+      setMessage(err instanceof ApiError ? err.message : "研判失败");
     } finally {
-      setAnalyzing(false);
+      setBusy(false);
     }
   }
 
+  if (loading && !data) return <Spinner />;
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return null;
+
+  const suggestion = data.suggestion;
+
   return (
-    <>
-      <PageHead
-        title={event.target_title || event.target_id}
-        sub={`${TYPE_TEXT[event.type] ?? event.type} · ${formatTs(event.ts)} · 规则 ${event.rule_version}`}
-        actions={
-          <Link className="btn ghost" to="/events">
-            返回事件流
-          </Link>
-        }
-      />
+    <Page
+      title={data.target_title ?? data.target_id}
+      desc={`${data.type} · ${ts(data.ts)} · ${data.gate_level}`}
+      actions={
+        <button className="btn" onClick={() => void analyze()} disabled={busy}>
+          {busy ? "研判中…" : suggestion ? "重新研判" : "生成研判"}
+        </button>
+      }
+    >
+      {message && <div className="notice">{message}</div>}
 
-      <div className="detail-grid">
-        <Card title="事实" sub="只呈现服务端算出的数字与采集到的字段">
-          <KV
-            rows={[
-              [
-                "级别",
-                <span className="kv-inline">
-                  <SeverityBadge value={event.severity} />
-                  <GateBadge value={event.gate_level} />
-                </span>,
-              ],
-              ["竞品", <Link to={`/competitors/${event.target_id}`}>{event.target_title || event.target_id}</Link>],
-              ["我方价", money(event.my_price)],
-              ["到手价置信", latest ? percent(latest.confidence) : "—"],
-              [
-                "缺失字段",
-                latest?.missing_fields?.length ? (
-                  <span className="tag-row">
-                    {latest.missing_fields.map((field) => (
-                      <span className="tag" key={field}>
-                        缺 {field}
-                      </span>
-                    ))}
+      <div className="split">
+        <div>
+          <Card title="事实" sub="到手价由服务端计算，采集端只上报原始观测">
+            <dl className="kv">
+              <dt>严重度</dt>
+              <dd>
+                <SeverityBadge value={data.severity} /> <span className="sub">{data.gate_level}</span>
+              </dd>
+              <dt>到手价估算</dt>
+              <dd>{data.note ?? money(data.point)}</dd>
+              <dt>我方价</dt>
+              <dd>{money(data.my_price)}</dd>
+              <dt>置信度</dt>
+              <dd>{pct(data.suggestion?.confidence ?? data.confidence)}</dd>
+              <dt>事件 ID</dt>
+              <dd className="mono sub">{data.id}</dd>
+            </dl>
+          </Card>
+
+          <Card title="证据" sub="建议必须引用允许集合内的证据，否则整条作废">
+            {data.evidence.length === 0 ? (
+              <Empty>没有证据 ID。</Empty>
+            ) : (
+              <div className="row">
+                {data.evidence.map((item) => (
+                  <span className="badge neutral mono" key={item}>
+                    {item}
                   </span>
-                ) : (
-                  <span className="ok-text">完整</span>
-                ),
-              ],
-              ["说明", event.note || "—"],
-            ]}
-          />
-        </Card>
-
-        <Card title="价格序列" sub="阴影为到手价区间，虚线为我方价格">
-          <PriceChart points={prices} myPrice={event.my_price} />
-        </Card>
-      </div>
-
-      <Card
-        title="建议"
-        sub={
-          suggestion
-            ? `由 ${suggestion.generated_by} 生成 · 置信 ${percent(suggestion.confidence)}`
-            : observe
-              ? "数据置信度不足，系统只提供观察"
-              : "尚未研判"
-        }
-        actions={
-          suggestion ? <StatusBadge value={suggestion.status} /> : undefined
-        }
-      >
-        {actionError && (
-          <div className="error-box">
-            <strong>研判失败</strong>
-            <span>{actionError}</span>
-          </div>
-        )}
-        {suggestion ? (
-          <div className="suggestion-panel">
-            <div className="suggestion-title">
-              <strong>{ACTION_TEXT[suggestion.action] ?? suggestion.action}</strong>
-              <GuardrailBadge value={suggestion.guardrail} />
-              <Link className="hint" to={`/suggestions/${suggestion.id}`}>
-                查看完整详情
-              </Link>
-              {suggestion.agent_run_id && (
-                <Link className="hint" to={`/agent/${suggestion.agent_run_id}`}>
-                  Agent 轨迹
-                </Link>
-              )}
-            </div>
-            <p className="narrative">{suggestion.narrative}</p>
-            {suggestion.impact_low != null && suggestion.impact_high != null && (
-              <p className="hint">
-                每件价差 ¥{suggestion.impact_low.toFixed(2)} ~ ¥
-                {suggestion.impact_high.toFixed(2)}（正数表示竞品更便宜）
-              </p>
+                ))}
+              </div>
             )}
-            {suggestion.guardrail_note && (
-              <p className="guardrail-note">{suggestion.guardrail_note}</p>
-            )}
-            <SuggestionActions suggestion={suggestion} onChange={reload} />
-          </div>
-        ) : observe ? (
-          <div className="warn-box">
-            数据置信度不足，系统不给出动作建议。补齐我方价格或等待更完整的观测后再研判。
-          </div>
-        ) : (
-          <button className="btn" disabled={analyzing} onClick={() => void analyze()}>
-            {analyzing ? "研判中…" : "生成建议"}
-          </button>
-        )}
-      </Card>
+          </Card>
 
-      <div className="detail-grid">
-        <Card title="证据链" sub="每个 ID 都能回溯到快照或案例">
-          {event.evidence.length === 0 ? (
-            <Empty>没有证据 ID</Empty>
-          ) : (
-            <div className="tag-row">
-              {event.evidence.map((item) => (
-                <code className="evidence" key={item}>
-                  {item}
-                </code>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        <Card title="相似历史案例" sub="检索结果参与证据闭包">
-          {event.similar_cases.length === 0 ? (
-            <Empty>没有检索到相似案例</Empty>
-          ) : (
-            <ul className="case-list">
-              {event.similar_cases.map((item) => (
-                <li key={item.id}>
-                  <div className="case-line">
+          <Card title="相似案例" sub="检索自历史归因与 7 日结果">
+            {data.similar_cases.length === 0 ? (
+              <Empty>暂无相似案例。</Empty>
+            ) : (
+              <ul className="timeline">
+                {data.similar_cases.map((item) => (
+                  <li key={item.id}>
                     <b>{item.summary}</b>
-                    <span className="tag">价格带 {item.price_band}</span>
-                  </div>
-                  <p>归因：{item.attribution}</p>
-                  {item.outcome_7d && <p className="ok-text">7 日结果：{item.outcome_7d}</p>}
-                  <code className="evidence">case:{item.id}</code>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+                    <span>
+                      {item.attribution}
+                      {item.outcome_7d ? ` · 7 日结果 ${item.outcome_7d}` : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        <div>
+          <Card title="建议">
+            {!suggestion ? (
+              <Empty>还没有研判结果，点右上角「生成研判」。</Empty>
+            ) : (
+              <>
+                <div className="row" style={{ marginBottom: 10 }}>
+                  <Badge tone="accent">{actionText(suggestion.action)}</Badge>
+                  <StatusBadge value={suggestion.status} />
+                  <span className="sub">置信 {pct(suggestion.confidence)}</span>
+                </div>
+                <p style={{ margin: "0 0 10px" }}>{suggestion.narrative}</p>
+                <dl className="kv">
+                  <dt>护栏</dt>
+                  <dd>{suggestion.guardrail}</dd>
+                  <dt>目标价</dt>
+                  <dd>{money(suggestion.target_price)}</dd>
+                  <dt>生成方式</dt>
+                  <dd className="mono">{suggestion.generated_by}</dd>
+                </dl>
+                <div className="row" style={{ marginTop: 14 }}>
+                  <Link className="btn ghost sm" to={`/suggestions/${suggestion.id}`}>
+                    打开建议
+                  </Link>
+                  {suggestion.agent_run_id && (
+                    <Link className="btn ghost sm" to={`/runs/${suggestion.agent_run_id}`}>
+                      查看轨迹
+                    </Link>
+                  )}
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
       </div>
-    </>
+    </Page>
   );
 }

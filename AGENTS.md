@@ -6,7 +6,7 @@
 
 ```bash
 pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
 前端（web-next）：
@@ -37,7 +37,7 @@ python scripts/eval_gate.py --tier smoke --update-baseline   # 更新基线
 
 ## 模型配置
 
-- 本地开发：Ollama（`LIRA_OLLAMA_MODEL`，默认 `qwen3:14b`）。
+- 本地开发：Ollama（`LIRA_OLLAMA_MODEL`，默认 `qwen3:4b`；显存够可换 `qwen3:14b`）。
 - 演示 / 生产：OpenAI 兼容通道，建议 `qwen-plus`：
 
 ```bash

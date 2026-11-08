@@ -36,11 +36,6 @@ def _beat_schedule() -> dict:
         f"lira.job.{kind}": {"task": f"lira.job.{kind}", "schedule": float(interval)}
         for kind, (interval, _fn) in scheduler.JOBS.items()
     }
-    digest_h, digest_m = _hhmm(scheduler.DIGEST_AT)
-    schedule["lira.job.digest"] = {
-        "task": "lira.job.digest",
-        "schedule": crontab(hour=digest_h, minute=digest_m),
-    }
     backup_h, backup_m = _hhmm(scheduler.config.BACKUP_AT)
     schedule["lira.job.backup"] = {
         "task": "lira.job.backup",

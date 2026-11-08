@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from app import db, notify, outcome
+from app import db, outcome
 from app.main import app
 
 client = TestClient(app)
@@ -55,18 +55,6 @@ def test_due_list_computes_observed_price_change():
     assert row["observed"]["baseline_price"] == 199.0
     assert row["observed"]["after_price"] == 209.0
     assert row["observed"]["delta_pct"] == 0.0503
-
-
-def test_notify_due_is_deduplicated(monkeypatch):
-    _seed_executed(8)
-    sent = []
-    monkeypatch.setattr(notify, "send", lambda text: sent.append(text) or True)
-
-    with db.get_db() as conn:
-        assert outcome.notify_due(conn, 7) == 1
-        assert outcome.notify_due(conn, 7) == 0
-
-    assert sent and "结果回收" in sent[0]
 
 
 def test_api_due_list_and_record_removes_item():

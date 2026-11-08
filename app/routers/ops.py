@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from .. import (
     agent, agent_graph, alignment, approval, auth, collect_logs, collect_tasks,
     collectors,
-    config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
-    executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
-    review_queue, reviews as review_store, scheduler, skills, stream, tracing,
+    config, db, docs as doc_store, eval as eval_store,
+    executor, gates, guardrail, ingest, metrics,
+    review_queue, scheduler, skills, stream, tracing,
     vectorstore,
 )
 from .. import llm
@@ -72,11 +72,6 @@ def ops_state(
     actor: str = Depends(auth.require_role("admin")),
 ) -> dict[str, Any]:
     with db.get_db() as conn:
-        files = [
-            dict(r) for r in conn.execute(
-                "SELECT * FROM inbox_file ORDER BY processed_at DESC LIMIT 10"
-            ).fetchall()
-        ]
         m = metrics.summary(conn, 24)
         collection = collectors.health(conn)
         freshness = collectors.freshness(conn)
@@ -86,17 +81,9 @@ def ops_state(
     )[:5] if (config.DATA_DIR / "backups").exists() else []
     return {
         "scheduler": scheduler.state(),
-        "inbox": {
-            "pending": inbox.pending_count(),
-            "failed": inbox.failed_count(),
-            "failed_files": inbox.failed_files(),
-            "recent": files,
-        },
         "collection": collection,
         "freshness": freshness,
         "auth_enabled": auth.AUTH_ENABLED,
-        "webhook": notify.enabled(),
-        "connector": {"configured": connectors.configured()},
         "metrics": m,
         "backups": backups,
     }
@@ -117,12 +104,6 @@ def ops_run(
         raise HTTPException(400, f"unknown job: {kind}") from exc
     return {"kind": kind, "result": detail}
 
-@router.post("/api/ops/inbox-scan")
-def ops_inbox_scan(
-    actor: str = Depends(auth.require_role("admin")),
-) -> dict[str, Any]:
-    return {"results": inbox.scan_once()}
-
 # ---------------- 健康 ----------------
 
 @router.get("/api/health")
@@ -140,12 +121,6 @@ def health() -> dict[str, Any]:
         ).fetchone()["c"]
         counts["my_products"] = conn.execute(
             "SELECT COUNT(*) c FROM my_product"
-        ).fetchone()["c"]
-        counts["reviews"] = conn.execute(
-            "SELECT COUNT(*) c FROM review"
-        ).fetchone()["c"]
-        counts["insights"] = conn.execute(
-            "SELECT COUNT(*) c FROM review_insight"
         ).fetchone()["c"]
         last = conn.execute(
             "SELECT * FROM ingest_log ORDER BY received_at DESC LIMIT 1"
@@ -174,3 +149,19 @@ def health() -> dict[str, Any]:
         "vector_index": vector_index,
         "llm_available": agent._llm_available(),
     }
+
+
+@router.get("/api/tools")
+def list_tools() -> list[dict[str, Any]]:
+    """Agent 可调用的工具清单与风险等级（MCP 暴露同一契约）。"""
+    from .. import tools as tool_registry
+
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "input_schema": tool.input_schema,
+            "risk": tool.risk,
+        }
+        for tool in tool_registry.TOOLS.values()
+    ]

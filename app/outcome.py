@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from . import cases, db, notify
+from . import cases, db
 
 RESULTS = ("improved", "unchanged", "worse")
 
@@ -167,42 +167,3 @@ def due_list(conn, days: int = 7, now: datetime | None = None) -> list[dict]:
 
 def overdue(conn, days: int = 7) -> list[dict]:
     return [row for row in due_list(conn, days) if row["due"]]
-
-
-def notify_due(conn, days: int = 7) -> int:
-    rows = [row for row in due_list(conn, days) if row["due"]]
-    if not rows:
-        return 0
-    now = datetime.now(timezone.utc)
-    fresh = []
-    for row in rows:
-        reminder = conn.execute(
-            "SELECT last_sent_at FROM outcome_reminder WHERE suggestion_id = ?",
-            (row["id"],),
-        ).fetchone()
-        last = _parse(reminder["last_sent_at"]) if reminder else None
-        if last and (now - last).total_seconds() < 20 * 3600:
-            continue
-        fresh.append(row)
-    if not fresh:
-        return 0
-
-    lines = ["【竞品情报·结果回收】"]
-    for row in fresh[:8]:
-        when = row["executed_at"] or row["created_at"]
-        lines.append(
-            f"· {row['target_title'] or row['target_id']}："
-            f"{row['action']} 已执行（{when}），待记录 7 日结果"
-        )
-    if not notify.send("\n".join(lines)):
-        return 0
-
-    now_iso = now.isoformat(timespec="seconds")
-    for row in fresh:
-        conn.execute(
-            "INSERT INTO outcome_reminder (suggestion_id, last_sent_at)"
-            " VALUES (?,?) ON CONFLICT(suggestion_id)"
-            " DO UPDATE SET last_sent_at = excluded.last_sent_at",
-            (row["id"], now_iso),
-        )
-    return len(fresh)

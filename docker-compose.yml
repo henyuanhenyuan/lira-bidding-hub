@@ -5,7 +5,7 @@ x-lira-env: &lira-env
   LIRA_QDRANT_URL: http://qdrant:6333
   # 本地开发用 Ollama；生产建议改走 OpenAI 兼容通道（qwen-plus / DeepSeek）
   LIRA_OLLAMA_URL: http://host.docker.internal:11434
-  LIRA_OLLAMA_MODEL: qwen3:14b
+  LIRA_OLLAMA_MODEL: qwen3:4b
   LIRA_LLM_ROUTE: auto
   # LIRA_OPENAI_BASE_URL: https://dashscope.aliyuncs.com/compatible-mode/v1
   # LIRA_OPENAI_API_KEY: sk-xxx
@@ -58,7 +58,7 @@ services:
       qdrant:
         condition: service_started
     ports:
-      - "8010:8010"
+      - "8011:8011"
     environment: *lira-env
     volumes:
       - ./data:/data

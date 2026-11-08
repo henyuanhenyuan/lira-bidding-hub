@@ -12,7 +12,7 @@ NEXT_DIR = BASE_DIR / "web-next" / "dist"
 # 模型通道。legacy = 旧的直连 Ollama；gateway = 多 Provider 路由（推荐）。
 # 本地 Ollama 适合开发与离线演示；对外演示/生产建议走 OpenAI 兼容通道（qwen-plus / DeepSeek）。
 OLLAMA_URL = os.getenv("LIRA_OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("LIRA_OLLAMA_MODEL", "qwen3:14b")
+OLLAMA_MODEL = os.getenv("LIRA_OLLAMA_MODEL", "qwen3:4b")
 LLM_TIMEOUT_S = float(os.getenv("LIRA_LLM_TIMEOUT", "20"))
 LLM_ENABLED = os.getenv("LIRA_LLM", "auto")  # auto | off | on
 

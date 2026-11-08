@@ -5,7 +5,7 @@
 
 param(
     [string]$Name = "lira",
-    [int]$Port = 8010
+    [int]$Port = 8011
 )
 
 $ErrorActionPreference = "Stop"

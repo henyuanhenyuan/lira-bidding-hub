@@ -23,6 +23,7 @@ class OllamaProvider:
         payload: dict = {
             "model": request.model or self.default_model,
             "stream": False,
+            # qwen3 等思考型模型：不关掉会把 token 全花在 thinking 上
             "think": False,
             "options": {
                 "temperature": request.temperature,

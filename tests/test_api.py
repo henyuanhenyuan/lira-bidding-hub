@@ -165,22 +165,6 @@ def test_validate_batch_reports_missing_price():
     assert body["errors"][0]["error"]
 
 
-def test_validate_csv_endpoint():
-    csv = (
-        "target_id,ts,list_price\n"
-        f"t1,{D1},299\n"
-        f"t2,{D1},\n"
-    )
-    r = client.post(
-        "/v1/import/validate",
-        files={"file": ("x.csv", csv.encode("utf-8"), "text/csv")},
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is False
-    assert body["rows"] == 2
-
-
 def test_products_seed_and_mapping_flow():
     client.post("/v1/ingest/snapshots", json={"snapshots": payload()["snapshots"][:1]})
     client.post("/api/my-products/seed")
@@ -205,12 +189,11 @@ def test_products_seed_and_mapping_flow():
 
 def test_ops_state_and_manual_run():
     o = client.get("/api/ops").json()
-    assert "scheduler" in o and "inbox" in o
-    assert "pending" in o["inbox"]
+    assert "scheduler" in o and "metrics" in o
 
-    r = client.post("/api/ops/run", params={"kind": "inbox_scan"})
+    r = client.post("/api/ops/run", params={"kind": "backup"})
     assert r.status_code == 200
-    assert r.json()["kind"] == "inbox_scan"
+    assert r.json()["kind"] == "backup"
 
 
 def test_outcome_endpoint_after_execute():
@@ -231,37 +214,6 @@ def test_outcome_endpoint_after_execute():
     got = client.get(f"/api/suggestions/{s['id']}/outcome")
     assert got.status_code == 200
     assert got.json()["result"] == "improved"
-
-
-def test_reviews_and_insight_endpoints():
-    client.post("/v1/ingest/snapshots", json={"snapshots": payload()["snapshots"][:1]})
-
-    add = client.post("/api/reviews", json={
-        "target_id": "t1",
-        "reviews": [
-            {"rating": 2, "content": "发货太慢了"},
-            {"rating": 1, "content": "物流不更新"},
-            {"rating": 2, "content": "快递慢"},
-            {"rating": 5, "content": "味道很好闻"},
-        ],
-    })
-    assert add.status_code == 200
-    assert add.json()["inserted"] == 4
-
-    listing = client.get("/api/reviews", params={"target_id": "t1"})
-    assert listing.status_code == 200
-    assert len(listing.json()) == 4
-
-    ins = client.post("/api/targets/t1/insights", params={"window_days": 7})
-    assert ins.status_code == 200
-    body = ins.json()
-    assert body["review_count"] == 4
-    assert body["topics"][0]["name"] == "物流发货"
-    assert body["opportunities"]
-
-    latest = client.get("/api/targets/t1/insights")
-    assert latest.status_code == 200
-    assert latest.json()["id"] == body["id"]
 
 
 def test_insight_404_without_reviews():

@@ -15,12 +15,6 @@ def backup_dir() -> Path:
     return d
 
 
-def _archive_inbox(target: Path, stamp: str) -> None:
-    inbox = config.DATA_DIR / "inbox"
-    if inbox.exists():
-        shutil.make_archive(str(target / f"inbox-{stamp}"), "zip", inbox)
-
-
 def _cleanup(target: Path, pattern: str, keep: int) -> tuple[int, int]:
     files = sorted(target.glob(pattern), reverse=True)
     removed = 0
@@ -70,7 +64,6 @@ def run(keep: int = 7, target_dir: Path | None = None) -> dict:
             )
         else:
             _pg_dump_fallback(out)
-        _archive_inbox(target, stamp)
         kept, removed = _cleanup(target, "lira-*.sql", keep)
         return {
             "path": str(out),
@@ -90,7 +83,6 @@ def run(keep: int = 7, target_dir: Path | None = None) -> dict:
             src.close()
             dst.close()
 
-    _archive_inbox(target, stamp)
     kept, removed = _cleanup(target, "lira-*.db", keep)
     return {
         "path": str(out),

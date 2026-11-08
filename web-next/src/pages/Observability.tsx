@@ -1,41 +1,30 @@
 import { useState } from "react";
 
-import { api, query } from "../api";
-import { Card, Empty, ErrorBox, Loader, Metric, PageHead } from "../components/ui";
-import { formatTs, percent } from "../format";
-import { useAsync } from "../hooks";
-import type { TraceNode, TraceSummary } from "../types";
+import { api, qs } from "../core/api";
+import { ts } from "../core/format";
+import { useAsync } from "../core/hooks";
+import type { Metrics, TraceNode, TraceSummary } from "../core/types";
+import { Badge, Card, Empty, ErrorBox, Page, Spinner, Stat, Table } from "../ui/kit";
 
-interface Metrics {
-  calls: number;
-  fallback_rate: number;
-  p50_latency_ms: number | null;
-  p95_latency_ms: number | null;
-  p99_latency_ms: number | null;
-  tokens: number;
-  cost: number;
-  budget_used_ratio: number | null;
-  by_model: { model: string; calls: number; fallback: number; tokens: number; cost: number }[];
-  by_kind: { kind: string; n: number; fallback: number }[];
-}
-
-function SpanRow({ node, depth }: { node: TraceNode; depth: number }) {
+function SpanRows({ nodes, depth = 0 }: { nodes: TraceNode[]; depth?: number }) {
   return (
     <>
-      <tr>
-        <td style={{ paddingLeft: `${12 + depth * 18}px` }}>
-          <span className="mono">{node.kind}</span> {node.name}
-        </td>
-        <td>
-          <span className={`badge ${node.status === "ok" ? "run-succeeded" : "run-failed"}`}>
-            {node.status}
-          </span>
-        </td>
-        <td className="num">{node.duration_ms}ms</td>
-      </tr>
-      {node.children.map((child) => (
-        <SpanRow key={child.id} node={child} depth={depth + 1} />
+      {nodes.map((node) => (
+        <tr key={node.id}>
+          <td style={{ paddingLeft: 14 + depth * 20 }}>
+            <span className="trace-kind">{node.kind}</span> {node.name}
+          </td>
+          <td>
+            <Badge tone={node.status === "ok" ? "ok" : "danger"}>{node.status}</Badge>
+          </td>
+          <td className="num">{node.duration_ms}ms</td>
+        </tr>
       ))}
+      {nodes.flatMap((node) =>
+        node.children.length ? [
+          <SpanRows key={`${node.id}-children`} nodes={node.children} depth={depth + 1} />,
+        ] : [],
+      )}
     </>
   );
 }
@@ -44,135 +33,106 @@ export default function Observability() {
   const { data, error, loading, reload } = useAsync(async () => {
     const [metrics, traces] = await Promise.all([
       api.get<Metrics>("/api/metrics"),
-      api.get<TraceSummary[]>("/api/observability/traces" + query({ limit: 20 })),
+      api.get<TraceSummary[]>("/api/observability/traces" + qs({ limit: 15 })),
     ]);
     return { metrics, traces };
   }, []);
 
-  const [trace, setTrace] = useState<{ roots: TraceNode[]; count: number } | null>(null);
-  const [active, setActive] = useState<string>("");
+  const [tree, setTree] = useState<{ roots: TraceNode[]; count: number } | null>(null);
+  const [active, setActive] = useState("");
 
-  async function openTrace(traceId: string) {
-    setActive(traceId);
-    const detail = await api.get<{ roots: TraceNode[]; count: number }>(
-      `/api/observability/traces/${traceId}`,
-    );
-    setTrace(detail);
+  async function openTrace(id: string) {
+    setActive(id);
+    setTree(await api.get<{ roots: TraceNode[]; count: number }>(`/api/observability/traces/${id}`));
   }
 
+  if (loading && !data) return <Spinner />;
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return null;
+
+  const { metrics, traces } = data;
+
   return (
-    <>
-      <PageHead
-        title="观测"
-        sub="模型调用、成本与 Agent 链路追踪"
-        actions={
-          <button className="btn ghost" onClick={() => void reload()}>
-            刷新
-          </button>
-        }
-      />
+    <Page
+      title="可观测"
+      desc="模型调用、成本与 Agent 链路追踪"
+      actions={
+        <button className="btn ghost" onClick={() => void reload()}>
+          刷新
+        </button>
+      }
+    >
+      <div className="stat-grid">
+        <Stat label="24h 调用" value={metrics.calls} hint={`回退率 ${(metrics.fallback_rate * 100).toFixed(0)}%`} tone={metrics.fallback_rate > 0.6 ? "warn" : "ok"} />
+        <Stat label="P50 / P95" value={`${metrics.p50_latency_ms ?? "—"} / ${metrics.p95_latency_ms ?? "—"}`} hint="毫秒" />
+        <Stat label="P99" value={`${metrics.p99_latency_ms ?? "—"}ms`} />
+        <Stat label="Token / 成本" value={metrics.tokens} hint={`¥${metrics.cost}`} />
+      </div>
 
-      {error && <ErrorBox message={error} />}
-      {loading && !data && <Loader />}
-
-      {data && (
-        <>
-          <div className="metric-row">
-            <Metric label="调用次数" value={data.metrics.calls} sub="近 24 小时" />
-            <Metric
-              label="回退率"
-              value={percent(data.metrics.fallback_rate)}
-              sub="模型不可用时走模板"
-              tone={data.metrics.fallback_rate > 0.3 ? "warn" : "ok"}
-            />
-            <Metric label="P50 / P95" value={`${data.metrics.p50_latency_ms ?? "—"} / ${data.metrics.p95_latency_ms ?? "—"}`} sub="毫秒" />
-            <Metric label="Token" value={data.metrics.tokens} sub={`成本 ¥${data.metrics.cost}`} />
-          </div>
-
-          <Card title="按模型" sub="多 Provider 路由的实际分布">
-            {data.metrics.by_model.length === 0 ? (
-              <Empty>还没有模型调用记录。</Empty>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>模型</th>
-                      <th>调用</th>
-                      <th>回退</th>
-                      <th>Token</th>
-                      <th>成本</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.metrics.by_model.map((row) => (
-                      <tr key={row.model}>
-                        <td>{row.model}</td>
-                        <td className="num">{row.calls}</td>
-                        <td className="num">{row.fallback}</td>
-                        <td className="num">{row.tokens}</td>
-                        <td className="num">¥{row.cost}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          <Card title="链路追踪" sub="点击一行查看 span 树">
-            {data.traces.length === 0 ? (
-              <Empty>还没有 trace 记录，运行一次研判后再来。</Empty>
-            ) : (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Trace</th>
-                      <th>Span 数</th>
-                      <th>开始时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.traces.map((row) => (
-                      <tr
-                        key={row.trace_id}
-                        className={row.trace_id === active ? "row-active" : ""}
-                        onClick={() => void openTrace(row.trace_id)}
-                      >
-                        <td className="mono">{row.trace_id.slice(0, 12)}</td>
-                        <td className="num">{row.spans}</td>
-                        <td>{formatTs(row.started_at)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
-
-          {trace && (
-            <Card title="Span 树" sub={`共 ${trace.count} 个 span`}>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Span</th>
-                      <th>状态</th>
-                      <th>耗时</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {trace.roots.map((node) => (
-                      <SpanRow key={node.id} node={node} depth={0} />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
+      <div className="split">
+        <Card title="按模型" sub="多 Provider 路由的真实分布" flush>
+          {metrics.by_model.length === 0 ? (
+            <Empty>还没有模型调用记录。</Empty>
+          ) : (
+            <Table head={["模型", "调用", "回退", "Token", "成本"]}>
+              {metrics.by_model.map((row) => (
+                <tr key={row.model}>
+                  <td className="mono">{row.model}</td>
+                  <td className="num">{row.calls}</td>
+                  <td className="num">{row.fallback}</td>
+                  <td className="num">{row.tokens}</td>
+                  <td className="num">¥{row.cost}</td>
+                </tr>
+              ))}
+            </Table>
           )}
-        </>
+        </Card>
+
+        <Card title="按类型" flush>
+          {metrics.by_kind.length === 0 ? (
+            <Empty>暂无数据。</Empty>
+          ) : (
+            <Table head={["类型", "调用", "回退"]}>
+              {metrics.by_kind.map((row) => (
+                <tr key={row.kind}>
+                  <td>{row.kind}</td>
+                  <td className="num">{row.n}</td>
+                  <td className="num">{row.fallback}</td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+      </div>
+
+      <Card title="链路追踪" sub="点击一条查看 span 树" flush>
+        {traces.length === 0 ? (
+          <Empty>还没有 trace，运行一次研判后再看。</Empty>
+        ) : (
+          <Table head={["Trace", "Span 数", "开始时间"]}>
+            {traces.map((row) => (
+              <tr
+                key={row.trace_id}
+                className="click"
+                onClick={() => void openTrace(row.trace_id)}
+                style={row.trace_id === active ? { background: "#fafaf7" } : undefined}
+              >
+                <td className="mono">{row.trace_id.slice(0, 12)}</td>
+                <td className="num">{row.spans}</td>
+                <td className="sub">{ts(row.started_at)}</td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      {tree && (
+        <Card title="Span 树" sub={`共 ${tree.count} 个 span`} flush>
+          <Table head={["Span", "状态", "耗时"]}>
+            <SpanRows nodes={tree.roots} />
+          </Table>
+        </Card>
       )}
-    </>
+    </Page>
   );
 }

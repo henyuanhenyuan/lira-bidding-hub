@@ -146,17 +146,6 @@ CREATE TABLE IF NOT EXISTS outcome (
   recorded_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS inbox_file (
-  name TEXT PRIMARY KEY,
-  content_hash TEXT,
-  status TEXT NOT NULL,
-  rows_ok INTEGER DEFAULT 0,
-  rows_dup INTEGER DEFAULT 0,
-  rows_rejected INTEGER DEFAULT 0,
-  error TEXT,
-  processed_at TEXT NOT NULL
-);
-
 CREATE TABLE IF NOT EXISTS job_run (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   kind TEXT NOT NULL,
@@ -165,31 +154,6 @@ CREATE TABLE IF NOT EXISTS job_run (
   status TEXT NOT NULL,
   detail TEXT
 );
-
-CREATE TABLE IF NOT EXISTS review (
-  id TEXT PRIMARY KEY,
-  target_id TEXT NOT NULL,
-  ts TEXT NOT NULL,
-  rating INTEGER,
-  content TEXT NOT NULL,
-  content_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE (target_id, content_hash)
-);
-CREATE INDEX IF NOT EXISTS ix_review_target_ts ON review(target_id, ts);
-
-CREATE TABLE IF NOT EXISTS review_insight (
-  id TEXT PRIMARY KEY,
-  target_id TEXT NOT NULL,
-  window_days INTEGER NOT NULL,
-  generated_at TEXT NOT NULL,
-  review_count INTEGER NOT NULL,
-  topics TEXT NOT NULL,
-  opportunities TEXT NOT NULL,
-  summary TEXT,
-  generated_by TEXT
-);
-CREATE INDEX IF NOT EXISTS ix_insight_target ON review_insight(target_id, generated_at);
 
 CREATE TABLE IF NOT EXISTS model_call (
   id TEXT PRIMARY KEY,
@@ -378,11 +342,6 @@ CREATE TABLE IF NOT EXISTS execution (
   rolled_back_at TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_execution_suggestion ON execution(suggestion_id);
-
-CREATE TABLE IF NOT EXISTS outcome_reminder (
-  suggestion_id TEXT PRIMARY KEY,
-  last_sent_at TEXT NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS collect_task (
   id TEXT PRIMARY KEY,

@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from .. import (
     agent, agent_graph, alignment, approval, auth, collect_logs, collect_tasks,
     collectors,
-    config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
-    executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
-    review_queue, reviews as review_store, scheduler, skills, stream, tracing,
+    config, db, docs as doc_store, eval as eval_store,
+    executor, gates, guardrail, ingest, metrics,
+    review_queue, scheduler, skills, stream, tracing,
     vectorstore,
 )
 from .. import llm
@@ -58,6 +58,13 @@ def create_doc(
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+
+@router.get("/api/docs/search")
+def search_docs(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """检索知识库切片（向量 + 关键词 + RRF），供前端验证 RAG 效果。"""
+    with db.get_db() as conn:
+        return doc_store.search_docs(conn, query, max(1, min(20, limit)))
+
 
 @router.get("/api/docs/{doc_id}")
 def get_doc(doc_id: str) -> dict[str, Any]:

@@ -7,10 +7,10 @@
 
 ```bash
 python -m pip install -r requirements.txt
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
 
-打开 http://127.0.0.1:8010 ，到「数据导入」点「载入演示数据」。
+打开 http://127.0.0.1:8011/next ，在「事件与研判」里打开一条事件，点「生成研判」。
 
 新版工作台（React + TS，灰度入口 `/next`）需要先构建：
 
@@ -570,7 +570,7 @@ Critic 只能驳回或放行，不能改动作、不能绕过证据闭包；失�
 | GET | `/api/stream` | SSE：事件 / 建议审批 / 采集入库推送 |
 | GET | `/login` | 独立登录页（鉴权开启时未登录访问 `/` 会跳转到这里） |
 
-交互式文档：http://127.0.0.1:8010/docs
+交互式文档：http://127.0.0.1:8011/docs
 
 ## CSV 列
 

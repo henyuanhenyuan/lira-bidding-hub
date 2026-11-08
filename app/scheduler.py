@@ -4,19 +4,15 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Callable
 
-from . import (
-    alignment, backup, config, connectors, db, inbox, notify, outcome, reviews,
-)
+from . import alignment, backup, config, db, outcome
 
 log = logging.getLogger(__name__)
 
 MODE = os.getenv("LIRA_SCHEDULER", "celery")  # celery | thread | off
 ENABLED = MODE != "off"
-SCAN_INTERVAL = float(os.getenv("LIRA_INBOX_INTERVAL", "15"))
-DIGEST_AT = os.getenv("LIRA_DIGEST_AT", "09:00")  # 本地时间 HH:MM
 
 _last: dict[str, str] = {}
 _started_at = ""
@@ -32,14 +28,6 @@ def _record(conn, kind: str, started: str, status: str, detail: str) -> None:
     )
 
 
-def job_inbox_scan() -> str:
-    results = inbox.scan_once()
-    if not results:
-        return "no files"
-    ok = sum(1 for r in results if not r.get("error") and not r.get("skipped"))
-    return f"{len(results)} files, {ok} ingested"
-
-
 def job_mapping_suggest() -> str:
     with db.get_db() as conn:
         created = alignment.auto_suggest(conn)
@@ -47,64 +35,21 @@ def job_mapping_suggest() -> str:
 
 
 def job_outcome_review() -> str:
-    """7 天后仍未回收结果的建议：统计到期数，并按 20 小时去重提醒。"""
+    """7 天后仍未回收结果的建议：统计到期数。"""
     with db.get_db() as conn:
         rows = outcome.due_list(conn, 7)
         due = [row for row in rows if row["due"]]
-        sent = outcome.notify_due(conn, 7)
-    return f"{len(due)} due, {sent} reminders sent"
-
-
-def job_review_insight() -> str:
-    with db.get_db() as conn:
-        targets = [
-            r["target_id"] for r in conn.execute(
-                "SELECT DISTINCT target_id FROM review"
-                " WHERE datetime(ts) >= datetime('now', '-7 days')"
-            ).fetchall()
-        ]
-        done = sum(1 for t in targets if reviews.analyze(conn, t, 7))
-    return f"{done} insights" if done else "no insights"
-
-
-def job_connector_sync() -> str:
-    if not connectors.configured():
-        return "connector not configured"
-    r = connectors.sync()
-    return f"{r['rows_ok']} rows, {r['events_created']} events"
+    return f"{len(due)} due"
 
 
 def job_backup() -> str:
-    r = backup.run(config.BACKUP_KEEP)
-    return f"{r['path']} ({r['size_kb']}KB, kept {r['kept']})"
-
-
-def job_digest() -> str:
-    with db.get_db() as conn:
-        events = [
-            {**dict(r), "evidence": db.loads(r["evidence"], [])}
-            for r in conn.execute(
-                "SELECT e.*, t.title AS target_title FROM event e"
-                " LEFT JOIN target t ON t.id = e.target_id"
-                " WHERE e.suppressed = 0 ORDER BY e.ts DESC LIMIT 10"
-            ).fetchall()
-        ]
-        collectors = [
-            dict(r) for r in conn.execute(
-                "SELECT collector, COUNT(*) c, MAX(ts) last_ts FROM snapshot GROUP BY collector"
-            ).fetchall()
-        ]
-    text = notify.digest(events, collectors)
-    sent = notify.send(text)
-    return f"{len(events)} events, webhook={'sent' if sent else 'skipped'}"
+    result = backup.run(config.BACKUP_KEEP)
+    return f"{result['path']} ({result['size_kb']}KB, kept {result['kept']})"
 
 
 JOBS: dict[str, tuple[float, Callable[[], str]]] = {
-    "inbox_scan": (SCAN_INTERVAL, job_inbox_scan),
     "mapping_suggest": (3600, job_mapping_suggest),
     "outcome_review": (900, job_outcome_review),
-    "review_insight": (21600, job_review_insight),
-    "connector_sync": (config.CONNECTOR_INTERVAL, job_connector_sync),
 }
 
 
@@ -117,11 +62,7 @@ def _run_job(kind: str, fn: Callable[[], str]) -> None:
         log.exception("job %s failed", kind)
         detail, status = str(exc), "error"
     _last[kind] = f"{started} {status}" + (f": {detail[:160]}" if status == "error" else "")
-    # 空转的扫描不写日志，避免每 15 秒一条把表撑爆
-    if status == "ok" and detail in (
-        "no files", "no suggestions", "0 awaiting outcome", "no insights",
-        "connector not configured",
-    ):
+    if status == "ok" and detail in ("no suggestions", "0 due"):
         return
     try:
         with db.get_db() as conn:
@@ -145,24 +86,18 @@ def _daily_due(key: str, at: str) -> bool:
     return True
 
 
-def _digest_due() -> bool:
-    return _daily_due("digest", DIGEST_AT)
-
-
 def _backup_due() -> bool:
     return _daily_due("backup", config.BACKUP_AT)
 
 
 def _loop(stop: threading.Event) -> None:
-    next_run = {k: 0.0 for k in JOBS}
+    next_run = {key: 0.0 for key in JOBS}
     while not stop.is_set():
         now = time.time()
         for kind, (interval, fn) in JOBS.items():
             if now >= next_run[kind]:
                 next_run[kind] = now + interval
                 _run_job(kind, fn)
-        if _digest_due():
-            _run_job("digest", job_digest)
         if _backup_due():
             _run_job("backup", job_backup)
         stop.wait(1.0)
@@ -206,9 +141,7 @@ def state() -> dict:
 
 
 def run_now(kind: str) -> str:
-    if kind == "digest":
-        fn = job_digest
-    elif kind == "backup":
+    if kind == "backup":
         fn = job_backup
     elif kind in JOBS:
         fn = JOBS[kind][1]

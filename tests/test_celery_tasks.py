@@ -13,18 +13,18 @@ def test_beat_schedule_covers_every_job():
 
     scheduled = set(celery_app.conf.beat_schedule)
     expected = {f"lira.job.{kind}" for kind in scheduler.JOBS}
-    expected |= {"lira.job.digest", "lira.job.backup"}
+    expected |= {"lira.job.backup"}
     assert expected <= scheduled
 
 
 def test_celery_task_records_job_run():
-    from app.tasks import task_outcome_review
+    from app.tasks import task_backup
 
-    result = task_outcome_review.apply().get()
+    result = task_backup.apply().get()
     assert result.endswith(" ok"), result
     with db.get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM job_run WHERE kind = 'outcome_review' ORDER BY id DESC LIMIT 1"
+            "SELECT * FROM job_run WHERE kind = 'backup' ORDER BY id DESC LIMIT 1"
         ).fetchone()
     assert row is not None
     assert row["status"] == "ok", row["detail"]

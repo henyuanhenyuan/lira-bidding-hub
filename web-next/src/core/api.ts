@@ -19,7 +19,7 @@ async function handle<T>(res: Response): Promise<T> {
       const body = (await res.json()) as { detail?: string };
       if (body?.detail) message = body.detail;
     } catch {
-      // 非 JSON 错误体，保留状态文本
+      /* 非 JSON 错误体 */
     }
     throw new ApiError(res.status, message);
   }
@@ -27,37 +27,29 @@ async function handle<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
-const jsonHeaders = { "Content-Type": "application/json" };
+const JSON_HEADERS = { "Content-Type": "application/json" };
 
 export const api = {
   get<T>(path: string): Promise<T> {
-    return fetch(path).then((r) => handle<T>(r));
+    return fetch(path).then((res) => handle<T>(res));
   },
   post<T>(path: string, body?: unknown): Promise<T> {
     return fetch(path, {
       method: "POST",
-      headers: jsonHeaders,
+      headers: JSON_HEADERS,
       body: body === undefined ? "{}" : JSON.stringify(body),
-    }).then((r) => handle<T>(r));
+    }).then((res) => handle<T>(res));
   },
   patch<T>(path: string, body: unknown): Promise<T> {
     return fetch(path, {
       method: "PATCH",
-      headers: jsonHeaders,
+      headers: JSON_HEADERS,
       body: JSON.stringify(body),
-    }).then((r) => handle<T>(r));
-  },
-  delete<T>(path: string): Promise<T> {
-    return fetch(path, { method: "DELETE" }).then((r) => handle<T>(r));
-  },
-  upload<T>(path: string, file: File): Promise<T> {
-    const form = new FormData();
-    form.append("file", file);
-    return fetch(path, { method: "POST", body: form }).then((r) => handle<T>(r));
+    }).then((res) => handle<T>(res));
   },
 };
 
-export function query(params: Record<string, string | number | undefined | null>): string {
+export function qs(params: Record<string, string | number | boolean | undefined | null>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") {

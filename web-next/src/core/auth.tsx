@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useState,
   type ReactNode,
 } from "react";
@@ -38,28 +39,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const logout = useCallback(async () => {
-    try {
-      await api.post("/api/logout");
-    } catch {
-      // 退出失败也回登录页
-    }
+    await api.post("/api/logout").catch(() => null);
     setMe(null);
     window.location.replace("/next/login");
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ me, loading, refresh, logout }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({ me, loading, refresh, logout }),
+    [me, loading, refresh, logout],
   );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthState {
-  const value = useContext(AuthContext);
-  if (!value) throw new Error("useAuth must be used inside AuthProvider");
-  return value;
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
+  return ctx;
 }
 
-export function canApprove(role?: string): boolean {
-  return role === "admin" || role === "manager";
+export function canManage(me: Me | null): boolean {
+  return me?.role === "admin" || me?.role === "manager";
 }

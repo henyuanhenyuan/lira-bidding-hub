@@ -1,90 +1,110 @@
 import { useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
-import { useAuth } from "../auth";
+import { api, ApiError } from "../core/api";
+import { useAuth } from "../core/auth";
 
 export default function Login() {
-  const { me, loading } = useAuth();
+  const { me, refresh } = useAuth();
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  if (!loading && me) return <Navigate to="/" replace />;
+  if (me) return <Navigate to="/" replace />;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!username.trim() || !password) {
-      setMessage("请输入用户名和密码");
-      return;
-    }
     setBusy(true);
-    setMessage("");
+    setError("");
     try {
-      const response = await fetch("/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
-      });
-      if (response.status === 429) throw new Error("尝试过于频繁，请稍后再试");
-      if (!response.ok) throw new Error("用户名或密码错误");
-      window.location.replace("/next/");
+      await api.post("/api/login", { username, password });
+      await refresh();
+      navigate("/", { replace: true });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "登录失败");
+      setError(
+        err instanceof ApiError && err.status === 401
+          ? "账号或密码不正确"
+          : err instanceof Error
+            ? err.message
+            : "登录失败",
+      );
+    } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="login-page">
-      <section className="login-intro">
-        <span className="brand-mark large">竞</span>
-        <h1>竞品情报工作台</h1>
-        <p>
-          采集、事件、建议、审批与复盘在同一条链路上。
-          <br />
-          每一个结论都能回到证据，每一次决策都能回收结果。
-        </p>
-        <ul>
-          <li>事实与数字由服务端计算，模型只负责解释</li>
-          <li>证据闭包不通过，建议整条作废</li>
-          <li>价格、评论、采集健康度一处可见</li>
-        </ul>
-      </section>
+    <div className="login">
+      <div className="login-art">
+        <div>
+          <div className="brand-mark" style={{ marginBottom: 28 }}>
+            L
+          </div>
+          <h1>
+            让 Agent 替你
+            <br />
+            盯竞品、给方案、留证据
+          </h1>
+          <p>
+            采集 → 到手价 → 事件 → 多 Agent 研判 → 人工审批 → 结果回收。
+            每一步都可审计，模型只解释，不决策。
+          </p>
+          <ul className="login-points">
+            <li>
+              <b>多 Agent</b>　Steward / Analyst / Risk / Writer 分工协作
+            </li>
+            <li>
+              <b>可评测</b>　120 条金标 + 检索指标 + 门禁
+            </li>
+            <li>
+              <b>可观测</b>　span 追踪、token 与成本、P95 延迟
+            </li>
+          </ul>
+        </div>
+        <span style={{ color: "#64748b", fontSize: 12 }}>
+          Lira Agent · 单机可运行 · 本地模型或 qwen-plus
+        </span>
+      </div>
 
-      <form className="login-card" onSubmit={submit}>
-        <div className="login-card-head">
-          <h2>登录</h2>
-          <span>内网部署 · 数据不出域</span>
-        </div>
-        <label>
-          用户名
-          <input
-            autoComplete="username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            autoFocus
-          />
-        </label>
-        <label>
-          密码
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
-        <button className="btn block" type="submit" disabled={busy}>
-          {busy ? "登录中…" : "登录"}
-        </button>
-        <div className="login-message" role="status" aria-live="polite">
-          {message}
-        </div>
-        <a className="login-old" href="/">
-          进入旧版界面
-        </a>
-      </form>
+      <div className="login-form">
+        <form className="login-card" onSubmit={submit}>
+          <h2>登录工作台</h2>
+          <p className="hint">使用账号密码进入。本地模式下可直接访问。</p>
+
+          {error && <div className="error-box">{error}</div>}
+
+          <label className="field">
+            <span>账号</span>
+            <input
+              className="input"
+              autoComplete="username"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="admin"
+            />
+          </label>
+          <label className="field">
+            <span>密码</span>
+            <input
+              className="input"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••"
+            />
+          </label>
+
+          <button className="btn" style={{ width: "100%", marginTop: 6 }} disabled={busy}>
+            {busy ? "登录中…" : "登录"}
+          </button>
+          <p className="login-foot">
+            未开启鉴权时也可直接进入；开启后请使用管理员分配的账号。
+          </p>
+        </form>
+      </div>
     </div>
   );
 }

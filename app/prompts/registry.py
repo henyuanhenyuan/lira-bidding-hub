@@ -11,7 +11,6 @@ from typing import Any
 VERSIONS = {
     "analysis": "analysis-v1",
     "critic": "critic-v1",
-    "review_summary": "review-summary-v1",
 }
 
 
@@ -24,14 +23,12 @@ class PromptSpec:
 
 
 def get(name: str) -> PromptSpec:
-    from .. import agent, reviews
+    from .. import agent
 
     if name == "analysis":
         return PromptSpec(name, VERSIONS[name], agent.PROMPT, agent.OUTPUT_SCHEMA)
     if name == "critic":
         return PromptSpec(name, VERSIONS[name], agent.CRITIC_PROMPT, agent.CRITIC_SCHEMA)
-    if name == "review_summary":
-        return PromptSpec(name, VERSIONS[name], reviews.SUMMARY_PROMPT, None)
     raise KeyError(f"未知 prompt：{name}")
 
 

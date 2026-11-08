@@ -15,15 +15,15 @@ export default defineConfig({
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: "http://127.0.0.1:8010",
+    baseURL: "http://127.0.0.1:8011",
     headless: true,
     trace: "retain-on-failure",
     ...(bundled ? {} : { channel }),
   },
   webServer: {
-    command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8010",
+    command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8011",
     cwd: "..",
-    url: "http://127.0.0.1:8010/api/health",
+    url: "http://127.0.0.1:8011/api/health",
     reuseExistingServer: true,
     timeout: 60_000,
     env: {
