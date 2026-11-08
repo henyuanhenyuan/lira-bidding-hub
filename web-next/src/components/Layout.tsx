@@ -80,7 +80,7 @@ export default function Layout() {
           <span className="brand-mark">竞</span>
           <span className="brand-text">
             <strong>竞品情报</strong>
-            <em>工作台 · 灰度版</em>
+            <em>竞品情报工作台</em>
           </span>
         </div>
 
@@ -125,9 +125,6 @@ export default function Layout() {
               <Icon name="logout" size={16} />
             </button>
           </div>
-          <a className="old-link" href="/">
-            返回旧版界面
-          </a>
         </div>
       </aside>
 
