@@ -23,7 +23,7 @@ async def lifespan(_: FastAPI):
         scheduler.scheduler.stop()
 
 
-app = FastAPI(title="电商竞品情报 Agent", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Lira 电商 · 竞品情报 Agent", version="0.3.0", lifespan=lifespan)
 
 # 默认拒绝：鉴权开启时，除登录/健康检查/静态资源外一律先验身份。
 PUBLIC_PATHS = {
