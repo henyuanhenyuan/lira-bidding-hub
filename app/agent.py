@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import assertions, config, evidence, llm as llm_gateway, metrics
+from . import assertions, config, context as context_builder, evidence, llm as llm_gateway, metrics, tracing
 from .safety import injection as injection_guard
 from .contracts import PricePoint
 
@@ -149,6 +149,16 @@ def _llm_available() -> bool:
         return False
 
 
+
+def _context_json(facts: dict, allowed: set[str]) -> str:
+    """统一入口：分层裁剪 + 不可信标记，并把预算结果写进 trace。"""
+    payload, stats = context_builder.build_analysis_payload(
+        facts, allowed, config.LLM_MAX_PROMPT_TOKENS
+    )
+    tracing.record("context.build", kind="context", attributes=stats)
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _extract_json(raw: str) -> dict | None:
     raw = (raw or "").strip()
     if raw.startswith("```"):
@@ -192,10 +202,7 @@ def _call_gateway(facts: dict, allowed: set[str]) -> Analysis | None:
             {"role": "system", "content": PROMPT},
             {
                 "role": "user",
-                "content": json.dumps(
-                    {"facts": facts, "allowed_evidence_ids": sorted(allowed)},
-                    ensure_ascii=False,
-                ),
+                "content": _context_json(facts, allowed),
             },
         ],
         kind="attribution",
@@ -257,10 +264,7 @@ def _call_llm(
             {"role": "system", "content": PROMPT},
             {
                 "role": "user",
-                "content": json.dumps(
-                    {"facts": facts, "allowed_evidence_ids": sorted(allowed)},
-                    ensure_ascii=False,
-                ),
+                "content": _context_json(facts, allowed),
             },
         ],
     }

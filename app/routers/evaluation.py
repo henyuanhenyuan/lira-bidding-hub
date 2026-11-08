@@ -36,10 +36,11 @@ def eval_cases() -> list[dict[str, Any]]:
 def run_eval(
     limit: int | None = None,
     tier: str | None = None,
+    retrieval: bool = True,
     actor: str = Depends(auth.require_role("admin", "manager")),
 ) -> dict[str, Any]:
     if tier:
-        return eval_runner.run(tier=tier, limit=limit)
+        return eval_runner.run(tier=tier, limit=limit, with_retrieval=retrieval)
     return eval_store.run(limit)
 
 @router.get("/api/eval/runs")

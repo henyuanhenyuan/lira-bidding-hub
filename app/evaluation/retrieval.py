@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .. import docs as doc_store
+from .. import docs as doc_store, embeddings, retrieval_service
 from . import metrics
 
 GOLDEN_DIR = Path(__file__).with_name("golden")
@@ -67,20 +67,33 @@ def load_cases(path: Path | None = None) -> list[RetrievalCase]:
 
 
 def seed_corpus(conn, corpus: list[CorpusDoc] | None = None) -> int:
-    """按标题去重写入知识库；返回新增文档数。"""
+    """按标题去重写入评测语料；embedding provider 变化时重建，保证可检索。"""
     corpus = corpus or load_corpus()
-    existing = {
-        row["title"] for row in conn.execute("SELECT title FROM doc").fetchall()
+    _, active = embeddings.embed("probe")
+    rows = {
+        row["title"]: row["id"]
+        for row in conn.execute(
+            "SELECT id, title FROM doc WHERE source = 'eval:rag'"
+        ).fetchall()
     }
     added = 0
     for item in corpus:
-        if item.title in existing:
-            continue
+        doc_id = rows.get(item.title)
+        if doc_id:
+            providers = {
+                row["embed_provider"]
+                for row in conn.execute(
+                    "SELECT DISTINCT embed_provider FROM doc_chunk WHERE doc_id = ?",
+                    (doc_id,),
+                ).fetchall()
+            }
+            if providers == {active}:
+                continue
+            doc_store.delete_doc(conn, doc_id)
         doc_store.create_doc(
             conn, title=item.title, content=item.content,
             source="eval:rag", category=item.category,
         )
-        existing.add(item.title)
         added += 1
     return added
 
@@ -97,7 +110,11 @@ def evaluate(
 ) -> dict[str, Any]:
     """对每条查询跑真实检索，计算关键词召回率与 MRR。"""
     cases = cases or load_cases()
-    search = search or (lambda query, limit: doc_store.search_docs(conn, query, limit))
+    search = search or (
+        lambda query, limit: retrieval_service.search_docs(
+            conn, query, limit, rewrite_llm=False
+        )
+    )
     per_case: list[dict[str, Any]] = []
     recalls: list[float] = []
     ranks: list[float] = []

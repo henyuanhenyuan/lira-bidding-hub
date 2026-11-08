@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from . import cases as case_store, collectors, db, docs as doc_store, guardrail
+from . import cases as case_store, collectors, db, docs as doc_store, guardrail, retrieval_service
 
 
 class ToolError(ValueError):
@@ -102,7 +102,7 @@ def search_docs(args: dict) -> dict:
     query = _require_str(args, "query")
     limit = _int_arg(args, "limit", 3, 1, 10)
     with db.get_db() as conn:
-        found = doc_store.search_docs(conn, query[:200], limit)
+        found = retrieval_service.search_docs(conn, query[:200], limit)
     return {"query": query, "count": len(found), "chunks": found}
 
 

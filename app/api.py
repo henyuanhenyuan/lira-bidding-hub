@@ -17,6 +17,8 @@ from .routers import auth_users
 from .routers import collect
 from .routers import ops
 from .routers import stream
+from .routers import settings as settings_router
+from .routers import workspace
 
 router = APIRouter()
 for sub in (
@@ -33,5 +35,7 @@ for sub in (
     collect.router,
     ops.router,
     stream.router,
+    workspace.router,
+    settings_router.router,
 ):
     router.include_router(sub)

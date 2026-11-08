@@ -82,6 +82,22 @@ if TEST_BACKEND == "postgres":
     TABLES = [t for t in TABLES if t != "case_fts"]
 
 
+CONFIG_KEYS = (
+    "LLM_BACKEND", "LLM_ROUTE", "OLLAMA_MODEL", "OLLAMA_URL",
+    "OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_API_KEY", "LLM_ENABLED",
+)
+
+
+@pytest.fixture(autouse=True)
+def _restore_config():
+    from app import config as app_config
+
+    snapshot = {key: getattr(app_config, key) for key in CONFIG_KEYS}
+    yield
+    for key, value in snapshot.items():
+        setattr(app_config, key, value)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _schema():
     db.init_db()

@@ -221,3 +221,8 @@ def search_docs(conn, query: str, limit: int = 3) -> list[dict[str, Any]]:
         }
         for row in ordered
     ]
+
+
+def delete_doc(conn, doc_id: str) -> None:
+    conn.execute("DELETE FROM doc_chunk WHERE doc_id = ?", (doc_id,))
+    conn.execute("DELETE FROM doc WHERE id = ?", (doc_id,))

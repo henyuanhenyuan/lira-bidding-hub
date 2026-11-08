@@ -11,6 +11,7 @@ from typing import Any
 VERSIONS = {
     "analysis": "analysis-v1",
     "critic": "critic-v1",
+    "judge": "judge-v1",
 }
 
 

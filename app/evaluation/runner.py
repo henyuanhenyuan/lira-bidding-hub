@@ -79,24 +79,28 @@ def run(
         config.LLM_ENABLED = "off"
     try:
         raw = eval_store.run(names=set(meta))
+        results = raw["results"]
+        _enrich(results, meta)
+        summary = metrics.aggregate(results)
+        summary["tier"] = tier
+
+        if use_judge:
+            calibrated = judge_mod.is_calibrated()
+            summary["judge"] = {"enabled": True, "calibrated": calibrated}
+            if not calibrated:
+                summary["warnings"] = [
+                    "判官未通过校准（kappa < 0.70），结果仅供参考，不参与门禁"
+                ]
+
     finally:
         config.LLM_ENABLED = previous_llm
-    results = raw["results"]
-    _enrich(results, meta)
-    summary = metrics.aggregate(results)
-    summary["tier"] = tier
-
-    if use_judge:
-        calibrated = judge_mod.is_calibrated()
-        summary["judge"] = {"enabled": True, "calibrated": calibrated}
-        if not calibrated:
-            summary["warnings"] = [
-                "判官未通过校准（kappa < 0.70），结果仅供参考，不参与门禁"
-            ]
 
     if with_retrieval:
+        # 检索评测用当前环境的 embedding provider，保证与线上语料一致；
+        # 改写固定为启发式，避免模型带来不确定性。
         with db.get_db() as conn:
             retrieval.seed_corpus(conn)
+        with db.get_db() as conn:
             retrieval_result = retrieval.evaluate(conn)
         summary["retrieval"] = retrieval_result
         summary["retrieval_recall_at_k"] = retrieval_result["recall_at_k"]

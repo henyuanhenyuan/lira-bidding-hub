@@ -4,6 +4,7 @@ import hashlib
 import logging
 import math
 import os
+from functools import lru_cache
 
 import httpx
 
@@ -40,19 +41,25 @@ def ollama_available() -> bool:
         return False
 
 
-def embed(text: str) -> tuple[list[float], str]:
-    """返回 (向量, 提供方)。Ollama 不可用时自动退回哈希向量。"""
-    if config.LLM_ENABLED != "off":
+@lru_cache(maxsize=512)
+def _embed_cached(text: str, llm_off: bool) -> tuple[str, tuple[float, ...]]:
+    if not llm_off:
         try:
-            r = httpx.post(
+            response = httpx.post(
                 f"{config.OLLAMA_URL}/api/embed",
                 json={"model": EMBED_MODEL, "input": text},
                 timeout=10.0,
             )
-            if r.status_code == 200:
-                emb = r.json().get("embeddings", [[]])[0]
-                if emb:
-                    return _normalize(emb), f"ollama:{EMBED_MODEL}"
+            if response.status_code == 200:
+                vector = response.json().get("embeddings", [[]])[0]
+                if vector:
+                    return f"ollama:{EMBED_MODEL}", tuple(_normalize(vector))
         except Exception as exc:
             log.warning("embedding fallback to hash: %s", exc)
-    return _hash_embed(text), "hash:256"
+    return "hash:256", tuple(_hash_embed(text))
+
+
+def embed(text: str) -> tuple[list[float], str]:
+    """返回 (向量, 提供方)，带 LRU 缓存；Ollama 不可用时退回哈希向量。"""
+    provider, vector = _embed_cached(text or "", config.LLM_ENABLED == "off")
+    return list(vector), provider

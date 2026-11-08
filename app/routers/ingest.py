@@ -62,3 +62,80 @@ def list_targets() -> list[dict[str, Any]]:
             " FROM target ORDER BY title"
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+MAX_UPLOAD = 20 * 1024 * 1024
+
+
+def _parse_file(raw: bytes, filename: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """支持 CSV 与 JSON；返回 (快照, 错误)。"""
+    import csv
+    import io
+    import json as _json
+
+    errors: list[dict[str, Any]] = []
+    text = raw.decode("utf-8-sig", errors="replace")
+    if filename.lower().endswith(".json"):
+        try:
+            data = _json.loads(text)
+        except ValueError as exc:
+            return [], [{"line": 0, "error": f"JSON 解析失败：{exc}"}]
+        rows = data.get("snapshots") if isinstance(data, dict) else data
+        if not isinstance(rows, list):
+            return [], [{"line": 0, "error": "JSON 需要是快照数组"}]
+        return rows, errors
+
+    snapshots: list[dict[str, Any]] = []
+    reader = csv.DictReader(io.StringIO(text))
+    for index, row in enumerate(reader, start=2):
+        try:
+            price = float(str(row.get("list_price") or "").strip())
+        except ValueError:
+            errors.append({"line": index, "error": "list_price 不是数字"})
+            continue
+        target = (row.get("target_id") or "").strip()
+        if not target:
+            errors.append({"line": index, "error": "target_id 为空"})
+            continue
+        observation: dict[str, Any] = {"list_price": price}
+        if row.get("title"):
+            observation["title"] = row["title"].strip()
+        observation["account_tier"] = (row.get("account_tier") or "normal").strip()
+        snapshots.append(
+            {
+                "target_id": target,
+                "ts": (row.get("ts") or "").strip() or None,
+                "collector": (row.get("collector") or "file").strip(),
+                "source_tier": int(row.get("source_tier") or 3),
+                "observation": observation,
+            }
+        )
+    return snapshots, errors
+
+
+@router.post("/api/import/file")
+async def import_file(file: UploadFile = File(...)) -> dict[str, Any]:
+    """文件接入：CSV（target_id,ts,list_price,title,source_tier）或 JSON 快照数组。"""
+    raw = await file.read()
+    if len(raw) > MAX_UPLOAD:
+        raise HTTPException(413, "file too large (max 20MB)")
+    rows, parse_errors = _parse_file(raw, file.filename or "upload.csv")
+    if not rows:
+        return {"ok": False, "rows": 0, "errors": parse_errors}
+
+    snapshots = []
+    for index, item in enumerate(rows):
+        try:
+            snapshots.append(SnapshotIn(**item))
+        except Exception as exc:  # 契约校验失败
+            parse_errors.append({"line": index + 2, "error": str(exc)[:120]})
+
+    if not snapshots:
+        return {"ok": False, "rows": 0, "errors": parse_errors}
+
+    with db.get_db() as conn:
+        report = ingest.ingest(conn, snapshots, source="file", file_name=file.filename)
+    out = report.as_dict()
+    out["errors"] = parse_errors + out.get("errors", [])
+    out["rows_rejected"] = out.get("rows_rejected", 0) + len(parse_errors)
+    return out

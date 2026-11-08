@@ -184,47 +184,33 @@ export function Shell({
 
   const groups: { group: string; items: { to: string; label: string }[] }[] = [
     {
-      group: "工作区",
-      items: [
-        { to: "/", label: "总览" },
-        { to: "/events", label: "事件与研判" },
-        { to: "/suggestions", label: "建议" },
-        { to: "/approvals", label: "待审批" },
-      ],
+      group: "主线",
+      items: [{ to: "/", label: "工作区" }],
     },
     {
-      group: "Agent",
+      group: "能力",
       items: [
-        { to: "/runs", label: "运行轨迹" },
+        { to: "/agent", label: "Agent" },
         { to: "/knowledge", label: "知识库" },
-        { to: "/tools", label: "工具与 MCP" },
-      ],
-    },
-    {
-      group: "质量",
-      items: [
-        { to: "/eval", label: "评测" },
-        { to: "/observability", label: "可观测" },
       ],
     },
     {
       group: "系统",
-      items: [
-        { to: "/targets", label: "竞品目标" },
-        { to: "/settings", label: "设置" },
-      ],
+      items: [{ to: "/settings", label: "设置" }],
     },
   ];
 
   return (
     <div className="shell">
+      <div className="bg" aria-hidden="true">
+        <span className="grid" />
+        <span className="orb orb-a" />
+        <span className="orb orb-b" />
+        <span className="orb orb-c" />
+      </div>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">L</div>
-          <div className="brand-text">
-            <b>Lira Agent</b>
-            <span>竞品情报 · Agent 工作台</span>
-          </div>
         </div>
         <nav className="nav">
           {groups.map((group) => (
@@ -239,7 +225,7 @@ export function Shell({
                 >
                   <i className="dot" />
                   {item.label}
-                  {item.to === "/approvals" && (pending ?? 0) > 0 && (
+                  {item.to === "/" && (pending ?? 0) > 0 && (
                     <span className="nav-badge">{pending}</span>
                   )}
                 </NavLink>

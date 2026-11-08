@@ -37,6 +37,12 @@ export default function Login() {
 
   return (
     <div className="login">
+      <div className="bg" aria-hidden="true">
+        <span className="grid" />
+        <span className="orb orb-a" />
+        <span className="orb orb-b" />
+        <span className="orb orb-c" />
+      </div>
       <div className="login-art">
         <div>
           <div className="brand-mark" style={{ marginBottom: 28 }}>
@@ -62,6 +68,21 @@ export default function Login() {
               <b>可观测</b>　span 追踪、token 与成本、P95 延迟
             </li>
           </ul>
+        </div>
+        <div className="mini-vend">
+          <div className="mv-top">LIRA MART</div>
+          <div className="mv-glass">
+            {["¥219", "¥179", "¥89", "¥224"].map((price, index) => (
+              <span className={`mv-item mv-${index}`} key={price}>
+                <b>{price}</b>
+              </span>
+            ))}
+          </div>
+          <div className="mv-foot">
+            <span className="mv-slot" />
+            <span className="mv-key" />
+            <span className="mv-key" />
+          </div>
         </div>
         <span style={{ color: "#64748b", fontSize: 12 }}>
           Lira Agent · 单机可运行 · 本地模型或 qwen-plus

@@ -62,8 +62,12 @@ def create_doc(
 @router.get("/api/docs/search")
 def search_docs(query: str, limit: int = 5) -> list[dict[str, Any]]:
     """检索知识库切片（向量 + 关键词 + RRF），供前端验证 RAG 效果。"""
+    from .. import retrieval_service
+
     with db.get_db() as conn:
-        return doc_store.search_docs(conn, query, max(1, min(20, limit)))
+        return retrieval_service.search_docs(
+            conn, query, max(1, min(20, limit)), rewrite_llm=False
+        )
 
 
 @router.get("/api/docs/{doc_id}")

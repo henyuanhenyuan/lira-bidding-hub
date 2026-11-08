@@ -6,12 +6,13 @@ from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import auth, config, db, scheduler
+from . import auth, config, db, scheduler, settings_store
 from .api import router
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings_store.apply()
     db.init_db()
     with db.get_db() as conn:
         auth.ensure_default_admin(conn)

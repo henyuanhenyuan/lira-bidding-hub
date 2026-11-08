@@ -1,0 +1,276 @@
+{
+  "model": "qwen3:4b",
+  "rubric_version": "faithfulness-v1",
+  "samples": 24,
+  "scored": 24,
+  "cohen_kappa": 1.0,
+  "min_kappa": 0.7,
+  "passed": true,
+  "generated_at": "2026-11-08T15:19:29+00:00",
+  "rows": [
+    {
+      "question": "价格带击穿的判定标准是什么？",
+      "contexts": [
+        "当竞品到手价低于我方价格的 95% 时，判定为价格带击穿。"
+      ],
+      "answer": "竞品到手价低于我方价格 95% 即为击穿。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "L3 事件需要什么数据源？",
+      "contexts": [
+        "L3 只允许 source_tier 为 0 或 1 的数据源触发。"
+      ],
+      "answer": "需要 T0 或 T1 数据源。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "毛利下限默认多少？",
+      "contexts": [
+        "每个 SKU 需要登记成本价与毛利下限，默认下限为 15%。"
+      ],
+      "answer": "默认毛利下限是 15%。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "券后价包含金币吗？",
+      "contexts": [
+        "券后价只扣除店铺券与平台券，不包含金币与会员权益。"
+      ],
+      "answer": "不包含金币和会员权益。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "置信度低于 0.5 会怎样？",
+      "contexts": [
+        "置信度低于 0.50 时门禁为观察 observe，只能给出 no_action。"
+      ],
+      "answer": "只能观察，动作是 no_action。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "谁可以批准建议？",
+      "contexts": [
+        "提交需要 member 及以上角色，批准需要 manager 或 admin。"
+      ],
+      "answer": "manager 或 admin 可以批准。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "执行失败怎么处理？",
+      "contexts": [
+        "执行失败或效果不符时按执行记录回滚，回滚前要重新校验护栏。"
+      ],
+      "answer": "按执行记录回滚，回滚前重新校验护栏。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "采集数据过期有什么提示？",
+      "contexts": [
+        "新鲜度不足或超过 SLA 时，总览必须显示告警。"
+      ],
+      "answer": "总览会显示告警。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "七日结果有哪几种？",
+      "contexts": [
+        "结果分为 improved、unchanged 和 worsened。"
+      ],
+      "answer": "improved、unchanged、worsened 三种。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "谁决定处置动作？",
+      "contexts": [
+        "处置动作永远由确定性策略给出，模型只负责解释与措辞。"
+      ],
+      "answer": "确定性策略决定，模型只写解释。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "提价事件默认怎么处理？",
+      "contexts": [
+        "提价事件通常只观察，不主动跟涨。"
+      ],
+      "answer": "默认观察，不主动跟涨。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "采集源切换时会告警吗？",
+      "contexts": [
+        "采集源发生切换时，本窗口抑制差值告警。"
+      ],
+      "answer": "会抑制差值告警。",
+      "human_label": "pass",
+      "judge_label": "pass",
+      "faithfulness": 5.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "价格带击穿的判定标准是什么？",
+      "contexts": [
+        "当竞品到手价低于我方价格的 95% 时，判定为价格带击穿。"
+      ],
+      "answer": "击穿标准是竞品价格低于我方 80%，并且需要立即降价 30%。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "L3 事件需要什么数据源？",
+      "contexts": [
+        "L3 只允许 source_tier 为 0 或 1 的数据源触发。"
+      ],
+      "answer": "任何数据源都可以触发 L3，包括论坛截图。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "毛利下限默认多少？",
+      "contexts": [
+        "每个 SKU 需要登记成本价与毛利下限，默认下限为 15%。"
+      ],
+      "answer": "默认毛利下限是 30%。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 5.0
+    },
+    {
+      "question": "券后价包含金币吗？",
+      "contexts": [
+        "券后价只扣除店铺券与平台券，不包含金币与会员权益。"
+      ],
+      "answer": "券后价会扣除金币和会员价。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "置信度低于 0.5 会怎样？",
+      "contexts": [
+        "置信度低于 0.50 时门禁为观察 observe，只能给出 no_action。"
+      ],
+      "answer": "系统会自动跟进降价。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "谁可以批准建议？",
+      "contexts": [
+        "提交需要 member 及以上角色，批准需要 manager 或 admin。"
+      ],
+      "answer": "任何人都可以批准，包括匿名用户。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "执行失败怎么处理？",
+      "contexts": [
+        "执行失败或效果不符时按执行记录回滚，回滚前要重新校验护栏。"
+      ],
+      "answer": "不需要回滚，直接重试即可。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "采集数据过期有什么提示？",
+      "contexts": [
+        "新鲜度不足或超过 SLA 时，总览必须显示告警。"
+      ],
+      "answer": "系统不会提示，继续用旧数据。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "七日结果有哪几种？",
+      "contexts": [
+        "结果分为 improved、unchanged 和 worsened。"
+      ],
+      "answer": "只有成功和失败两种。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "谁决定处置动作？",
+      "contexts": [
+        "处置动作永远由确定性策略给出，模型只负责解释与措辞。"
+      ],
+      "answer": "由大模型自由决定是否降价。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "提价事件默认怎么处理？",
+      "contexts": [
+        "提价事件通常只观察，不主动跟涨。"
+      ],
+      "answer": "必须立刻跟随提价。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 1.0,
+      "relevance": 1.0
+    },
+    {
+      "question": "采集源切换时会告警吗？",
+      "contexts": [
+        "采集源发生切换时，本窗口抑制差值告警。"
+      ],
+      "answer": "会立刻触发 L3 告警。",
+      "human_label": "fail",
+      "judge_label": "fail",
+      "faithfulness": 2.0,
+      "relevance": 3.0
+    }
+  ]
+}

@@ -47,6 +47,11 @@ export const api = {
       body: JSON.stringify(body),
     }).then((res) => handle<T>(res));
   },
+  upload<T>(path: string, file: File): Promise<T> {
+    const form = new FormData();
+    form.append("file", file);
+    return fetch(path, { method: "POST", body: form }).then((res) => handle<T>(res));
+  },
 };
 
 export function qs(params: Record<string, string | number | boolean | undefined | null>): string {

@@ -16,6 +16,16 @@ from typing import Any, Callable
 from .. import db
 
 RUBRIC_VERSION = "faithfulness-v1"
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "faithfulness": {"type": "integer"},
+        "relevance": {"type": "integer"},
+        "rationale": {"type": "string"},
+    },
+    "required": ["faithfulness", "relevance", "rationale"],
+}
 CALIBRATION_PATH = Path(__file__).with_name("baselines") / "judge_calibration.json"
 
 RUBRIC = """你是严格的评测员。给定【问题】【检索上下文】【回答】，按 1-5 分打分：
@@ -158,21 +168,20 @@ def build_default() -> Judge | None:
 
 
 def _load_ask_callable() -> Callable[[str], str] | None:
-    from .. import agent  # 延迟导入，避免评测包对 Agent 的循环依赖
+    from .. import llm
 
     def ask(prompt: str) -> str:
-        payload = agent._post_chat(
-            {
-                "model": os.getenv("LIRA_JUDGE_MODEL", ""),
-                "stream": False,
-                "think": False,
-                "options": {"temperature": 0.0, "num_predict": 200},
-                "messages": [
-                    {"role": "system", "content": RUBRIC},
-                    {"role": "user", "content": prompt},
-                ],
-            }
+        response = llm.complete(
+            [
+                {"role": "system", "content": RUBRIC},
+                {"role": "user", "content": prompt},
+            ],
+            kind="judge",
+            prompt_name="judge",
+            schema=OUTPUT_SCHEMA,
+            max_tokens=200,
+            temperature=0.0,
         )
-        return payload.get("message", {}).get("content") or ""
+        return response.text if response else ""
 
     return ask

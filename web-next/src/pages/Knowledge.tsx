@@ -1,26 +1,44 @@
 import { useState } from "react";
 
 import { api, qs } from "../core/api";
-import { ts } from "../core/format";
 import { useAsync } from "../core/hooks";
-import type { DocChunkHit, DocItem } from "../core/types";
+import { Cabinet, ItemShelf } from "../ui/viz";
 import { Badge, Card, Empty, ErrorBox, Field, Page, Spinner, Table } from "../ui/kit";
+
+interface DocItem {
+  id: string;
+  title: string;
+  category?: string | null;
+  created_at: string;
+  chunk_count: number;
+}
+
+interface Hit {
+  id: string;
+  doc_title?: string;
+  chunk_no: number;
+  content: string;
+  score: number;
+}
 
 export default function Knowledge() {
   const { data, error, loading, reload } = useAsync(() => api.get<DocItem[]>("/api/docs"), []);
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<DocChunkHit[] | null>(null);
+  const [hits, setHits] = useState<Hit[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
 
   async function search() {
     if (!query.trim()) return;
     setBusy(true);
     setMessage("");
+    const started = Date.now();
     try {
-      setHits(await api.get<DocChunkHit[]>("/api/docs/search" + qs({ query, limit: 5 })));
+      const result = await api.get<Hit[]>("/api/docs/search" + qs({ query, limit: 5 }));
+      setHits(result);
+      setMessage(`召回 ${result.length} 条 · ${Date.now() - started}ms`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "检索失败");
     } finally {
@@ -38,7 +56,7 @@ export default function Knowledge() {
       await api.post("/api/docs", { title, content, category: "policy" });
       setTitle("");
       setContent("");
-      setMessage("已写入知识库并完成切片索引");
+      setMessage("已写入并完成切片索引");
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "写入失败");
@@ -47,50 +65,74 @@ export default function Knowledge() {
     }
   }
 
+  if (loading && !data) return <Spinner />;
+  if (error) return <ErrorBox message={error} />;
+  if (!data) return null;
+
+  const docs = data;
+
   return (
-    <Page title="知识库" desc="规则与策略文档经父子块切分后进入向量库，供 Agent 检索引用">
+    <Page title="知识库" desc="规则文档构成的知识星图；命中分数来自真实检索链路">
       {message && <div className="notice">{message}</div>}
-      {error && <ErrorBox message={error} />}
 
       <div className="split">
-        <Card title="检索验证" sub="向量 + 关键词 + RRF 融合，分数来自真实检索链路">
+        <Card title="知识货架" sub="每份文档是一件商品，高度是切片数量">
+          <Cabinet title="知识商品" tag={`${docs.length} 件`}>
+          <ItemShelf
+            items={docs.map((doc) => ({
+              id: doc.id,
+              title: doc.title,
+              value: doc.chunk_count,
+              label: `${doc.chunk_count} 片`,
+              tone:
+                doc.category === "policy"
+                  ? "#22d3ee"
+                  : doc.category === "ops"
+                    ? "#a78bfa"
+                    : "#34d399",
+            }))}
+          />
+          </Cabinet>
+        </Card>
+
+        <Card title="检索" sub="向量 + 关键词 + RRF + 二跳">
           <div className="row" style={{ marginBottom: 12 }}>
             <input
               className="input"
               style={{ flex: 1 }}
-              placeholder="例如：价格带击穿的判定标准是什么？"
+              placeholder="例如：价格带击穿怎么判定？"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && void search()}
             />
             <button className="btn" disabled={busy} onClick={() => void search()}>
-              检索
+              {busy ? "检索中…" : "检索"}
             </button>
           </div>
 
           {hits === null ? (
-            <Empty>输入问题，看看会召回哪些规则切片。</Empty>
+            <Empty>输入问题，看看会点亮哪些规则。</Empty>
           ) : hits.length === 0 ? (
-            <Empty>没有召回到切片。先补充文档或换个问法。</Empty>
+            <Empty>没有召回到切片。</Empty>
           ) : (
-            <ul className="timeline">
-              {hits.map((hit) => (
-                <li key={hit.id}>
-                  <b>
-                    {hit.doc_title} <span className="sub">#{hit.chunk_no}</span>
-                  </b>
-                  <span style={{ whiteSpace: "pre-wrap" }}>{hit.content}</span>
-                  <span>
-                    <Badge tone="accent">score {hit.score}</Badge>{" "}
-                    <span className="mono sub">{hit.id}</span>
-                  </span>
-                </li>
+            <div className="hit-list">
+              {hits.map((hit, index) => (
+                <div className={`hit rank-${index}`} key={hit.id}>
+                  <div className="hit-head">
+                    <span className="hit-rank">{index + 1}</span>
+                    <b>{hit.doc_title}</b>
+                    <Badge tone="accent">score {hit.score}</Badge>
+                  </div>
+                  <p>{hit.content}</p>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
         </Card>
+      </div>
 
-        <Card title="新增文档" sub="写入后立即可被检索">
+      <div className="split">
+        <Card title="新增文档" sub="写入后立即可被检索与引用">
           <Field label="标题">
             <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} />
           </Field>
@@ -106,29 +148,26 @@ export default function Knowledge() {
             写入知识库
           </button>
         </Card>
-      </div>
 
-      <Card title="文档列表" sub={`${data?.length ?? 0} 篇`} flush>
-        {loading && !data ? (
-          <Spinner />
-        ) : (data ?? []).length === 0 ? (
-          <Empty>还没有文档。</Empty>
-        ) : (
-          <Table head={["标题", "分类", "切片", "创建时间"]}>
-            {(data ?? []).map((doc) => (
-              <tr key={doc.id}>
-                <td>
-                  <b>{doc.title}</b>
-                  <div className="sub mono">{doc.id}</div>
-                </td>
-                <td>{doc.category ?? "—"}</td>
-                <td className="num">{doc.chunk_count}</td>
-                <td className="sub">{ts(doc.created_at)}</td>
-              </tr>
-            ))}
-          </Table>
-        )}
-      </Card>
+        <Card title="文档" sub={`${docs.length} 篇`} flush>
+          {docs.length === 0 ? (
+            <Empty>还没有文档。</Empty>
+          ) : (
+            <Table head={["标题", "分类", "切片"]}>
+              {docs.map((doc) => (
+                <tr key={doc.id}>
+                  <td>
+                    <b>{doc.title}</b>
+                    <div className="sub">{doc.created_at.slice(0, 16).replace("T", " ")}</div>
+                  </td>
+                  <td>{doc.category ?? "—"}</td>
+                  <td className="num">{doc.chunk_count}</td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+      </div>
     </Page>
   );
 }

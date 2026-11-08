@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from app import db  # noqa: E402
 from app.evaluation import judge as judge_mod  # noqa: E402
 from app.evaluation import metrics  # noqa: E402
 
@@ -41,6 +42,7 @@ def main() -> int:
     parser.add_argument("--min-kappa", type=float, default=0.70)
     args = parser.parse_args()
 
+    db.init_db()
     judge = judge_mod.build_default()
     if judge is None:
         print("未配置 LIRA_JUDGE_MODEL 或模型不可用，无法校准。")
