@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -23,13 +22,13 @@ async def lifespan(_: FastAPI):
         scheduler.scheduler.stop()
 
 
-app = FastAPI(title="电商竞品情报 Agent", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="电商竞品情报 Agent", version="0.3.0", lifespan=lifespan)
 
 # 默认拒绝：鉴权开启时，除登录/健康检查/静态资源外一律先验身份。
 PUBLIC_PATHS = {
     "/", "/login", "/next", "/api/login", "/api/logout", "/api/health", "/favicon.ico",
 }
-PUBLIC_PREFIXES = ("/static/", "/next/")
+PUBLIC_PREFIXES = ("/next/",)
 
 
 @app.middleware("http")
@@ -46,9 +45,6 @@ async def auth_guard(request: Request, call_next):
 
 db.init_db()
 app.include_router(router)
-
-if config.WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=config.WEB_DIR), name="static")
 
 if (config.NEXT_DIR / "assets").exists():
     app.mount(
@@ -73,50 +69,35 @@ FALLBACK = """<!doctype html><meta charset="utf-8">
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page() -> Response:
-    page = config.WEB_DIR / "login.html"
-    if page.exists():
-        return FileResponse(page)
-    return HTMLResponse("<h2>登录页缺失</h2>", status_code=500)
+    """登录页由 React 工作台提供。"""
+    return RedirectResponse("/next/login", status_code=303)
 
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Response:
-    """默认入口收敛到 React 工作台；未构建时回落到旧版。"""
     if auth.AUTH_ENABLED and not auth.verify_token(request.cookies.get(auth.COOKIE)):
-        return RedirectResponse("/login", status_code=303)
+        return RedirectResponse("/next/login", status_code=303)
     if (config.NEXT_DIR / "index.html").exists():
         return RedirectResponse("/next", status_code=303)
-    idx = config.WEB_DIR / "index.html"
-    if idx.exists():
-        return FileResponse(idx)
-    return HTMLResponse(FALLBACK)
-
-
-@app.get("/legacy", response_class=HTMLResponse)
-def legacy_app() -> Response:
-    """旧版界面保留一个版本，供尚未迁移的页面使用。"""
-    idx = config.WEB_DIR / "index.html"
-    if idx.exists():
-        return FileResponse(idx)
     return HTMLResponse(FALLBACK)
 
 
 @app.get("/next", response_class=HTMLResponse)
 @app.get("/next/{path:path}", response_class=HTMLResponse)
 def next_app(path: str = "") -> Response:
-    """React 灰度入口。静态资源由 /next/assets 提供，其余路径回落到 SPA。"""
+    """React 工作台。静态资源由 /next/assets 提供，其余路径回落到 SPA。"""
     index = config.NEXT_DIR / "index.html"
     if index.exists():
         return FileResponse(index)
     return HTMLResponse(
-        "<h2>新版前端尚未构建</h2><p>cd web-next && npm install && npm run build</p>",
+        "<h2>前端尚未构建</h2><p>cd web-next && npm install && npm run build</p>",
         status_code=503,
     )
 
 
 @app.get("/favicon.ico")
 def favicon() -> Response:
-    icon = Path(config.WEB_DIR) / "favicon.ico"
+    icon = config.NEXT_DIR / "favicon.ico"
     if icon.exists():
         return FileResponse(icon)
     return HTMLResponse("", status_code=204)

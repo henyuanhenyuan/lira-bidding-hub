@@ -19,8 +19,11 @@ import Events from "./pages/Events";
 import ImportPage from "./pages/ImportPage";
 import Skills from "./pages/Skills";
 import Login from "./pages/Login";
+import Mappings from "./pages/Mappings";
 import NotFound from "./pages/NotFound";
 import Observability from "./pages/Observability";
+import Reviews from "./pages/Reviews";
+import Targets from "./pages/Targets";
 import Outcomes from "./pages/Outcomes";
 import Overview from "./pages/Overview";
 import SuggestionDetail from "./pages/SuggestionDetail";
@@ -56,6 +59,9 @@ export default function App() {
           <Route path="approvals" element={<Approvals />} />
           <Route path="outcomes" element={<Outcomes />} />
           <Route path="cases" element={<Cases />} />
+          <Route path="reviews" element={<Reviews />} />
+          <Route path="targets" element={<Targets />} />
+          <Route path="mappings" element={<Mappings />} />
           <Route path="docs" element={<Docs />} />
           <Route path="ask" element={<Ask />} />
           <Route path="agent" element={<AgentRuns />} />

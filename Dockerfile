@@ -19,7 +19,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY web ./web
+
 COPY --from=web /web/dist ./web-next/dist
 
 ENV LIRA_DATA_DIR=/data \

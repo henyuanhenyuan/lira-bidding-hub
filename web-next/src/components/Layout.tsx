@@ -29,6 +29,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { to: "/", label: "总览", icon: "overview", end: true },
       { to: "/competitors", label: "竞品 360", icon: "competitors" },
+      { to: "/reviews", label: "评论洞察", icon: "cases" },
       { to: "/cases", label: "案例库", icon: "cases" },
     ],
   },
@@ -47,6 +48,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/collect-logs", label: "采集日志", icon: "trace", adminOnly: true },
       { to: "/agent", label: "Agent 轨迹", icon: "trace" },
       { to: "/docs", label: "规则库", icon: "docs" },
+      { to: "/targets", label: "竞品目标", icon: "competitors", staffOnly: true },
+      { to: "/mappings", label: "SKU 对齐", icon: "cases", staffOnly: true },
       { to: "/ask", label: "问数", icon: "ask" },
       { to: "/skills", label: "Skill 管理", icon: "skills", staffOnly: true },
       { to: "/eval", label: "评测", icon: "eval", staffOnly: true },

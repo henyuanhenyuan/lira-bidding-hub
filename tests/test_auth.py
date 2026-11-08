@@ -117,10 +117,10 @@ def test_root_redirects_to_login(monkeypatch):
     client = TestClient(app)
     res = client.get("/", follow_redirects=False)
     assert res.status_code == 303
-    assert res.headers["location"] == "/login"
-    page = client.get("/login")
-    assert page.status_code == 200
-    assert "登录" in page.text
+    assert res.headers["location"] == "/next/login"
+    page = client.get("/login", follow_redirects=False)
+    assert page.status_code == 303
+    assert page.headers["location"] == "/next/login"
 
 
 def test_ingest_token_allows_rpa(monkeypatch):

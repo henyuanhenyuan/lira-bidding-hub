@@ -29,3 +29,7 @@ web-next/dist/
 Thumbs.db
 .idea/
 .vscode/
+
+# Playwright
+web-next/test-results/
+web-next/playwright-report/

@@ -18,7 +18,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 cd web-next && npm install && npm run build
 ```
 
-旧版仍保留在 `/`，未构建新版时不影响使用。
+前端只有一个 React 工作台；未构建时 `/` 返回提示页，API 仍可用。
 
 生产或多进程部署用 PostgreSQL（compose 已带数据库）：
 
@@ -124,7 +124,7 @@ app/
   ingest.py      导入、幂等、事件落库
   api.py         REST 接口
   main.py        应用入口与静态托管
-web/             旧版前端（原生 JS，零构建，灰度回退）
+web-next/        React + TS + Vite 工作台（唯一前端）
 web-next/        新版前端（React + TS + Vite）
 tests/           pytest
 data/            SQLite 与日志（运行时生成）
@@ -607,7 +607,7 @@ LIRA_TEST_DB=postgres python -m pytest -q
 
 | 入口 | 技术 | 定位 |
 |---|---|---|
-| `/` | 原生 JS，零构建 | 旧版，保留作为回退 |
+| `/next` | React + TS + Vite | 唯一前端入口 |
 | `/next` | React + TS + Vite | 新版工作台，四模块 IA |
 
 新版构建后由 Python 服务自动挂载 `web-next/dist`；未构建时 `/next` 返回 503 提示。
@@ -629,7 +629,7 @@ LIRA_TEST_DB=postgres python -m pytest -q
 ```
 
 鉴权开启后，新版登录页是独立路由 `/next/login`，由前端守卫跳转；API 仍由服务端中间件默认拒绝。
-旧版入口 `/login` 由服务端 303 守卫。
+`/login` 由服务端 303 重定向到 `/next/login`。
 
 窄屏（<900px）侧栏自动收成图标栏，新版详情页在 1180px 以下自动改为单列。
 
@@ -639,7 +639,7 @@ LIRA_TEST_DB=postgres python -m pytest -q
 - 评论话题依赖词典，未做语义聚类；新词需要补词典
 - 不做自动调价；holdout 已有，但样本量小时结论不可信
 - 单租户；上传按整文件读入内存（未做流式）
-- 旧版前端处于冻结状态；新功能只加在 `/next`
+- 前端只保留 `web-next`，旧版已删除
 - MCP SDK 锁定 1.x；升级 2.x 需要把 `FastMCP` 迁移到 `MCPServer`
 - 关键词召回按后端分流：SQLite 用 FTS5 trigram，PostgreSQL 用 pg_trgm + ILIKE
 - SSE 走进程内广播，只支持单进程；多 worker 需换 Redis pub/sub

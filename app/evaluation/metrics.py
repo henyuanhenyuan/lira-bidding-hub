@@ -122,14 +122,18 @@ def compare(
     floors: dict[str, float] | None = None,
 ) -> list[dict[str, Any]]:
     """floor + delta 双门限比较，返回违规列表（空表示通过）。"""
-    floors = floors or {
+    floors = dict(floors or {
         "action_accuracy": 0.9,
         "evidence_closure_rate": 1.0,
         "trace_completion_rate": 1.0,
-    }
+    })
+    if "retrieval_recall_at_k" in current:
+        floors.setdefault("retrieval_recall_at_k", 0.5)
     violations: list[dict[str, Any]] = []
     for name, floor in floors.items():
-        value = float(current.get(name) or 0.0)
+        if current.get(name) is None:
+            continue
+        value = float(current.get(name))
         if value < floor:
             violations.append(
                 {"metric": name, "kind": "floor", "value": value, "threshold": floor}

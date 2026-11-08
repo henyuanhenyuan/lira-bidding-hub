@@ -545,3 +545,15 @@ export interface TraceNode {
   attributes?: Record<string, unknown>;
   children: TraceNode[];
 }
+
+export interface MappingItem {
+  id: string;
+  score: number;
+  my_sku: string;
+  my_title?: string | null;
+  my_price?: number | null;
+  target_id: string;
+  target_title?: string | null;
+  method?: string | null;
+  decided_by?: string | null;
+}

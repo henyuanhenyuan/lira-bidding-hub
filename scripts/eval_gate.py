@@ -24,6 +24,7 @@ from app.evaluation import runner  # noqa: E402
 DEFAULT_BASELINE = ROOT / "app" / "evaluation" / "baselines" / "baseline.json"
 TRACKED = (
     "action_accuracy", "evidence_closure_rate", "trace_completion_rate",
+    "retrieval_recall_at_k", "retrieval_mrr",
 )
 
 
@@ -51,7 +52,11 @@ def main() -> int:
         limit=args.limit or None,
         write_artifact=not args.no_artifact,
     )
-    summary = {key: run["metrics"].get(key) for key in TRACKED}
+    summary = {
+        key: run["metrics"][key]
+        for key in TRACKED
+        if run["metrics"].get(key) is not None
+    }
 
     if args.update_baseline:
         args.baseline.parent.mkdir(parents=True, exist_ok=True)

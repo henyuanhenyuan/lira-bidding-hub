@@ -10,11 +10,13 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from .. import db
 
 RUBRIC_VERSION = "faithfulness-v1"
+CALIBRATION_PATH = Path(__file__).with_name("baselines") / "judge_calibration.json"
 
 RUBRIC = """你是严格的评测员。给定【问题】【检索上下文】【回答】，按 1-5 分打分：
 - faithfulness：回答中的每个事实是否都能在检索上下文中找到依据；编造即为 1 分。
@@ -123,6 +125,25 @@ def _extract_json(text: str) -> dict[str, Any]:
     if start < 0 or end <= start:
         raise ValueError("judge 未返回 JSON")
     return json.loads(text[start:end + 1])
+
+
+def load_calibration(path: Path | None = None) -> dict[str, Any] | None:
+    target = path or CALIBRATION_PATH
+    if not target.exists():
+        return None
+    try:
+        return json.loads(target.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+
+
+def is_calibrated(
+    min_kappa: float = 0.70, path: Path | None = None
+) -> bool:
+    report = load_calibration(path)
+    if not report:
+        return False
+    return bool(report.get("passed")) and float(report.get("cohen_kappa") or 0) >= min_kappa
 
 
 def build_default() -> Judge | None:

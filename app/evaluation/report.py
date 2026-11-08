@@ -48,6 +48,25 @@ def render(run: dict[str, Any]) -> str:
                 f"{_pct(item['action_accuracy'])} |"
             )
 
+    retrieval = summary.get("retrieval") or {}
+    if retrieval:
+        lines += [
+            "", "## 检索质量", "",
+            f"- Recall@{retrieval.get('k', 5)}：{_pct(retrieval.get('recall_at_k', 0))}",
+            f"- MRR：{retrieval.get('mrr', 0)}",
+            f"- 查询数：{retrieval.get('cases', 0)}",
+        ]
+        missed = [
+            item for item in retrieval.get("per_case", [])
+            if item.get("missed_keywords")
+        ]
+        if missed:
+            lines += ["", "| 查询 | 未命中关键词 |", "| --- | --- |"]
+            for item in missed[:10]:
+                lines.append(
+                    f"| {item['query']} | {'、'.join(item['missed_keywords'])} |"
+                )
+
     failures = [item for item in run.get("results", []) if not item.get("passed")]
     if failures:
         lines += ["", "## 坏例", "", "| 用例 | 场景 | 期望 → 实际 |", "| --- | --- | --- |"]

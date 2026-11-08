@@ -8,7 +8,7 @@ from typing import Any
 
 from .. import config, db
 from .. import eval as eval_store
-from . import datasets, metrics
+from . import datasets, judge as judge_mod, metrics, retrieval
 
 RESULT_DIR = Path(config.DATA_DIR) / "eval" / "results"
 
@@ -59,6 +59,7 @@ def run(
     limit: int | None = None,
     use_judge: bool = False,
     use_llm: bool = False,
+    with_retrieval: bool = True,
     write_artifact: bool = True,
 ) -> dict[str, Any]:
     cases = datasets.select(datasets.load(), tier)
@@ -84,6 +85,22 @@ def run(
     _enrich(results, meta)
     summary = metrics.aggregate(results)
     summary["tier"] = tier
+
+    if use_judge:
+        calibrated = judge_mod.is_calibrated()
+        summary["judge"] = {"enabled": True, "calibrated": calibrated}
+        if not calibrated:
+            summary["warnings"] = [
+                "判官未通过校准（kappa < 0.70），结果仅供参考，不参与门禁"
+            ]
+
+    if with_retrieval:
+        with db.get_db() as conn:
+            retrieval.seed_corpus(conn)
+            retrieval_result = retrieval.evaluate(conn)
+        summary["retrieval"] = retrieval_result
+        summary["retrieval_recall_at_k"] = retrieval_result["recall_at_k"]
+        summary["retrieval_mrr"] = retrieval_result["mrr"]
 
     with db.get_db() as conn:
         conn.execute(
