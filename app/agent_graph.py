@@ -6,7 +6,8 @@ import time
 from typing import Any, TypedDict
 
 from . import (
-    agent, cases as case_store, config, db, guardrail, metrics, skills, stream, tools,
+    agent, cases as case_store, config, db, guardrail, handoff, llm, memory,
+    metrics, safety, skills, stream, tools, tracing,
 )
 from .contracts import PricePoint
 
@@ -26,6 +27,7 @@ class AgentState(TypedDict, total=False):
     plan: list[dict[str, Any]]
     tool_results: list[dict[str, Any]]
     allowed_evidence: list[str]
+    tainted: bool
     analysis: dict[str, Any]
     checks: dict[str, Any]
     risk: dict[str, Any]
@@ -78,6 +80,11 @@ def _step(
         conn.execute(
             "UPDATE agent_run SET step_count = ? WHERE id = ?", (seq, run_id)
         )
+    tracing.record(
+        f"{kind}/{name}", kind=kind, status=status, run_id=run_id,
+        duration_ms=latency_ms,
+        attributes={"input": _json(input_obj)[:500] if input_obj else None},
+    )
 
 
 def _finish_run(
@@ -177,6 +184,9 @@ def _load_context(state: AgentState) -> AgentState:
                 else 0.15
             ),
         }
+        facts["memory_notes"] = memory.recall_text(
+            run_id=run_id, query=str(facts.get("title") or ""), limit=3
+        )
         _step(
             run_id, seq, "context", "加载事件与价格",
             {"event_id": state["event_id"]},
@@ -356,6 +366,135 @@ def _act_node(state: AgentState) -> AgentState:
                 "latency_ms": latency,
             }
         )
+    tainted = bool(state.get("tainted"))
+    for item in results:
+        if item["tool"] == "search_docs" and item["status"] == "ok" and item["result"]:
+            if item["result"].get("chunks"):
+                tainted = True
+    return {"tool_results": results, "seq": seq, "tainted": tainted}
+
+
+REACT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "done": {"type": "boolean"},
+        "tool": {"type": "string"},
+        "args": {"type": "object"},
+        "reason": {"type": "string"},
+    },
+    "required": ["done"],
+}
+
+
+def _ask_react(
+    state: AgentState,
+    results: list[dict[str, Any]],
+    allowed: list[str],
+    step: int,
+) -> dict[str, Any] | None:
+    facts = state.get("facts") or {}
+    used = [
+        {"tool": item["tool"], "args": item.get("args"),
+         "status": item["status"]}
+        for item in results
+    ]
+    response = llm.complete(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "你是竞品情报 Agent 的规划器。只输出 JSON。\n"
+                    "根据已有工具结果判断是否还需要补充证据。\n"
+                    "可用工具：" + ", ".join(allowed) + "\n"
+                    '已完成则输出 {"done": true}；否则输出 {"done": false, "tool": "<工具名>", "args": {...}, "reason": "<20字>"}。\n'
+                    "不得重复调用相同工具与参数；不得臆造工具。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {
+                        "step": step,
+                        "event_type": facts.get("event_type"),
+                        "severity": facts.get("severity"),
+                        "title": facts.get("title"),
+                        "confidence": facts.get("confidence"),
+                        "done_tools": used,
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        kind="planner",
+        schema=REACT_SCHEMA,
+        max_tokens=160,
+    )
+    if response is None:
+        return None
+    return agent._extract_json(response.text)
+
+
+def _react_node(state: AgentState) -> AgentState:
+    """有界 ReAct：最多 N 步，无进展或超时即停止，结果写回 tool_results。"""
+    run_id = state["run_id"]
+    seq = state.get("seq", 0)
+    results = list(state.get("tool_results") or [])
+    if os.getenv("LIRA_AGENT_LOOP", "on") != "on":
+        return {"tool_results": results, "seq": seq}
+    if not agent._llm_available():
+        return {"tool_results": results, "seq": seq}
+
+    skill = state.get("skill") or {}
+    allowed = list(
+        safety.restrict_tools(
+            sorted(set(skill.get("allowed_tools") or tools.TOOLS)),
+            tainted=bool(state.get("tainted")),
+        )
+    )
+    started = time.perf_counter()
+    used = {
+        (item["tool"], json.dumps(item.get("args") or {}, sort_keys=True))
+        for item in results
+    }
+    steps = 0
+    for step in range(config.AGENT_MAX_STEPS):
+        if time.perf_counter() - started > config.AGENT_MAX_SECONDS:
+            break
+        decision = _ask_react(state, results, allowed, step)
+        if not decision or decision.get("done"):
+            break
+        name = str(decision.get("tool") or "")
+        args = decision.get("args") or {}
+        if name not in allowed or not isinstance(args, dict):
+            break
+        key = (name, json.dumps(args, sort_keys=True))
+        if key in used:
+            break
+        used.add(key)
+        seq += 1
+        call_started = time.perf_counter()
+        status, error, result = "ok", None, None
+        try:
+            result = tools.call_tool(name, args)
+        except Exception as exc:
+            status, error = "error", str(exc)
+        latency = int((time.perf_counter() - call_started) * 1000)
+        _step(run_id, seq, "react_tool", name, args, result, status, latency, error)
+        results.append(
+            {
+                "tool": name, "args": args, "status": status,
+                "result": result, "error": error, "latency_ms": latency,
+            }
+        )
+        steps += 1
+
+    seq += 1
+    _step(
+        run_id, seq, "react", "有界 ReAct 循环",
+        {"max_steps": config.AGENT_MAX_STEPS},
+        {"extra_steps": steps, "allowed_tools": allowed},
+        latency_ms=int((time.perf_counter() - started) * 1000),
+    )
     return {"tool_results": results, "seq": seq}
 
 
@@ -395,6 +534,15 @@ def _steward_node(state: AgentState) -> AgentState:
         {"stale": stale, "downgraded": downgraded},
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
+    if handoff.allowed(run_id):
+        seq += 1
+        handoff.record(
+            run_id, seq,
+            handoff.Handoff(
+                "steward", "analysis", "facts_ready",
+                {"stale": stale, "downgraded": downgraded},
+            ),
+        )
     return {"facts": facts, "seq": seq}
 
 
@@ -680,6 +828,12 @@ def _propose_node(state: AgentState) -> AgentState:
         ).fetchone()
 
     suggestion = {**dict(row), "similar_cases": cases}
+    memory.remember(
+        run_id, memory.SESSION,
+        f"{facts.get('title')}｜{facts.get('event_type')}/{facts.get('severity')}"
+        f"｜{analysis['action']}｜{analysis['narrative'][:60]}",
+        {"event_id": state.get("event_id"), "action": analysis["action"]},
+    )
     _step(
         run_id, seq, "suggestion", "写入建议",
         {"action": analysis["action"]},
@@ -696,6 +850,7 @@ def _build_graph():
     graph.add_node("load", _load_context)
     graph.add_node("planning", _plan_node)
     graph.add_node("tools", _act_node)
+    graph.add_node("react", _react_node)
     graph.add_node("steward", _steward_node)
     graph.add_node("analysis", _analyze_node)
     graph.add_node("risk", _risk_node)
@@ -705,8 +860,9 @@ def _build_graph():
     graph.set_entry_point("load")
     graph.add_edge("load", "planning")
     graph.add_edge("planning", "tools")
+    graph.add_edge("tools", "react")
     graph.add_conditional_edges(
-        "tools", _route_after_tools,
+        "react", _route_after_tools,
         {"steward": "steward", "analysis": "analysis"},
     )
     graph.add_edge("steward", "analysis")
@@ -720,7 +876,7 @@ def _build_graph():
 
 def _run_without_langgraph(state: AgentState) -> AgentState:
     final = dict(state)
-    for node in (_load_context, _plan_node, _act_node):
+    for node in (_load_context, _plan_node, _act_node, _react_node):
         final.update(node(final))  # type: ignore[arg-type]
     if "steward" in _stages(final):
         final.update(_steward_node(final))  # type: ignore[arg-type]
@@ -735,6 +891,10 @@ GRAPH = _build_graph()
 def run_for_event(event_id: str, trigger: str = "api") -> dict[str, Any]:
     """执行一次完整研判，返回建议；过程写入 agent_run / agent_step。"""
     run_id = _new_run(event_id, trigger)
+    tracing.new_trace()
+    root_span = tracing.record("agent_run", "run", run_id=run_id,
+                               attributes={"trigger": trigger})
+    span_token = tracing.set_span(root_span)
     started = time.perf_counter()
     state: AgentState = {
         "event_id": event_id, "run_id": run_id, "trigger": trigger, "seq": 0,
@@ -783,4 +943,5 @@ def run_for_event(event_id: str, trigger: str = "api") -> dict[str, Any]:
         )
         raise
     finally:
+        tracing.reset_span(span_token)
         metrics.reset_run_id(run_token)

@@ -233,3 +233,42 @@ def update_skill(conn, skill_id: str, changes: dict[str, Any]) -> dict[str, Any]
     if not row:
         raise KeyError(skill_id)
     return _row(row)
+
+
+SOP_STEP_KEYS = ("action", "criteria", "tools")
+
+
+def validate_playbook(playbook: str | None) -> dict[str, Any]:
+    """校验 SOP：结构化 playbook 需含步骤、判据与合法工具；旧版纯文本视为兼容格式。"""
+    text = (playbook or "").strip()
+    if not text:
+        return {"format": "empty", "valid": False, "errors": ["playbook 为空"], "steps": 0}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return {"format": "text", "valid": True, "errors": [], "steps": 0}
+    if not isinstance(data, dict):
+        return {"format": "invalid", "valid": False,
+                "errors": ["SOP 必须是 JSON 对象"], "steps": 0}
+    steps = data.get("steps")
+    errors: list[str] = []
+    if not isinstance(steps, list) or not steps:
+        errors.append("steps 必须是非空数组")
+        steps = []
+    for index, step in enumerate(steps):
+        if not isinstance(step, dict):
+            errors.append(f"第 {index + 1} 步必须是对象")
+            continue
+        missing = [key for key in SOP_STEP_KEYS if key not in step]
+        if missing:
+            errors.append(f"第 {index + 1} 步缺少：{', '.join(missing)}")
+        unknown = [tool for tool in (step.get("tools") or []) if tool not in ALL_TOOLS]
+        if unknown:
+            errors.append(f"第 {index + 1} 步含未知工具：{', '.join(unknown)}")
+    return {
+        "format": "sop",
+        "valid": not errors,
+        "errors": errors,
+        "steps": len(steps),
+        "name": data.get("name"),
+    }

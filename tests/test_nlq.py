@@ -1,10 +1,17 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from app import db, nlq
 
-T = "2026-10-24T02:17:00+08:00"
+
+def _ts(days_ago: int) -> str:
+    moment = datetime.now(timezone.utc) - timedelta(days=days_ago)
+    return moment.replace(microsecond=0).isoformat()
+
+
+T = _ts(1)
 
 
 def seed():
@@ -17,7 +24,7 @@ def seed():
             conn.execute(
                 "INSERT INTO price_point (target_id, ts, price_low, price_high,"
                 " confidence, missing_fields, discontinuity) VALUES (?,?,?,?,?,?,0)",
-                ("t1", f"2026-10-2{i + 3}T02:17:00+08:00", price, price, 0.8, "[]"),
+                ("t1", _ts(4 - i), price, price, 0.8, "[]"),
             )
         conn.execute(
             "INSERT INTO event (id,target_id,ts,type,severity,gate_level,suppressed,"

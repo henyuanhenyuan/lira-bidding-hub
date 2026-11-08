@@ -510,3 +510,38 @@ export interface UserRow {
   role: Role;
   created_at: string;
 }
+
+export interface EvalRunSummary {
+  run_key: string;
+  total: number;
+  passed: number;
+  accuracy: number;
+  tier?: string | null;
+  metrics?: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface EvalBadcase {
+  case_name: string;
+  segment: string;
+  difficulty: string;
+  reason: string;
+  created_at: string;
+}
+
+export interface TraceSummary {
+  trace_id: string;
+  spans: number;
+  started_at: string;
+}
+
+export interface TraceNode {
+  id: string;
+  name: string;
+  kind: string;
+  status: string;
+  duration_ms: number;
+  parent_id?: string | null;
+  attributes?: Record<string, unknown>;
+  children: TraceNode[];
+}

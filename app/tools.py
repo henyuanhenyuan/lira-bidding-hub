@@ -10,12 +10,24 @@ class ToolError(ValueError):
     """工具参数或执行错误。"""
 
 
+RISK_READ = "read"
+RISK_REVERSIBLE = "reversible_write"
+RISK_IRREVERSIBLE = "irreversible_write"
+RISK_LEVELS = (RISK_READ, RISK_REVERSIBLE, RISK_IRREVERSIBLE)
+WRITE_RISKS = frozenset({RISK_REVERSIBLE, RISK_IRREVERSIBLE})
+
+
+class ToolPermissionError(PermissionError):
+    """工具权限不足（MCP 令牌缺失或越权调用）。"""
+
+
 @dataclass(frozen=True)
 class Tool:
     name: str
     description: str
     input_schema: dict[str, Any]
     handler: Callable[[dict[str, Any]], Any]
+    risk: str = RISK_READ
 
 
 def _require_str(args: dict, key: str) -> str:
@@ -285,3 +297,32 @@ def call_tool(name: str, args: dict[str, Any] | None = None) -> Any:
     if not isinstance(payload, dict):
         raise ToolError("arguments must be an object")
     return tool.handler(payload)
+
+
+def risk_of(name: str) -> str:
+    tool = TOOLS.get(name)
+    return tool.risk if tool else RISK_IRREVERSIBLE
+
+
+def is_write_tool(name: str) -> bool:
+    return risk_of(name) in WRITE_RISKS
+
+
+def read_only(names: list[str]) -> list[str]:
+    return [name for name in names if not is_write_tool(name)]
+
+
+def authorize_mcp(token: str | None = None) -> None:
+    """MCP stdio 服务的静态令牌校验。
+
+    - 未配置 LIRA_MCP_SECRET：开发模式，放行；
+    - 配置后必须提供与之相等的 LIRA_MCP_TOKEN。
+    """
+    import os
+
+    secret = os.getenv("LIRA_MCP_SECRET", "").strip()
+    if not secret:
+        return
+    provided = token if token is not None else os.getenv("LIRA_MCP_TOKEN", "")
+    if provided != secret:
+        raise ToolPermissionError("MCP 令牌无效或缺失")

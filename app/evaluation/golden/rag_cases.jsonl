@@ -1,0 +1,15 @@
+{"query": "价格带击穿的判定标准是什么？", "expected_keywords": ["价格带", "95%"], "segment": "policy"}
+{"query": "L3 事件需要什么数据源才能触发？", "expected_keywords": ["L3", "数据源"], "segment": "policy"}
+{"query": "毛利下限如何影响跟进建议？", "expected_keywords": ["毛利下限", "护栏"], "segment": "policy"}
+{"query": "券后价与到手价有什么区别？", "expected_keywords": ["券后", "到手价"], "segment": "policy"}
+{"query": "活动叠加时到手价如何估算？", "expected_keywords": ["活动", "到手价"], "segment": "policy"}
+{"query": "置信度低时系统会怎么处理？", "expected_keywords": ["置信度", "观察"], "segment": "policy"}
+{"query": "人工审批需要哪些角色？", "expected_keywords": ["审批", "角色"], "segment": "policy"}
+{"query": "执行失败如何回滚？", "expected_keywords": ["回滚", "执行"], "segment": "policy"}
+{"query": "历史相似案例如何检索？", "expected_keywords": ["案例", "检索"], "segment": "ops"}
+{"query": "采集数据过期会有什么告警？", "expected_keywords": ["新鲜度", "告警"], "segment": "ops"}
+{"query": "竞品突然换采集源怎么处理？", "expected_keywords": ["采集源", "抑制"], "segment": "ops"}
+{"query": "7 日结果如何回收？", "expected_keywords": ["7 日", "结果"], "segment": "ops"}
+{"query": "提价事件的标准处理动作是什么？", "expected_keywords": ["提价", "观察"], "segment": "policy"}
+{"query": "价格事件严重度如何分档？", "expected_keywords": ["严重度", "10%"], "segment": "policy"}
+{"query": "如何避免模型越权给出执行动作？", "expected_keywords": ["确定性", "策略"], "segment": "policy"}

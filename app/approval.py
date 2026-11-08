@@ -58,6 +58,36 @@ def _guardrail_allows(sugg, actor_role: str, note: str | None) -> None:
         raise TransitionError("未设置成本价，需管理员确认后才能推进")
 
 
+HIGH_RISK_ACTIONS = ("adjust_coupon", "follow", "join_promo")
+
+
+def _strict_hitl() -> bool:
+    import os
+
+    return os.getenv("LIRA_HITL_STRICT", "off") == "on"
+
+
+def assess_risk(sugg) -> dict[str, object]:
+    """按动作后果与护栏状态给审批分级。
+
+    read/低风险动作（hold、no_action）由普通审批人处理；
+    会改价的动作为 high，必须经理及以上，且不能自审。
+    """
+    action = sugg["action"]
+    guard = sugg["guardrail"] or "unknown"
+    if action in HIGH_RISK_ACTIONS or guard == "blocked":
+        return {
+            "level": "high",
+            "roles": ("admin",),
+            "reason": f"动作 {action} 会改变价格或护栏为 {guard}",
+        }
+    return {
+        "level": "normal",
+        "roles": APPROVER_ROLES,
+        "reason": f"动作 {action} 不直接改价",
+    }
+
+
 def submit(conn, sid: str, actor: str, role: str, note: str | None = None) -> dict:
     _require(role, MEMBER_ROLES, "submit")
     sugg = _load(conn, sid)
@@ -76,6 +106,9 @@ def submit(conn, sid: str, actor: str, role: str, note: str | None = None) -> di
 def approve(conn, sid: str, actor: str, role: str, note: str | None = None) -> dict:
     _require(role, APPROVER_ROLES, "approve")
     sugg = _load(conn, sid)
+    risk = assess_risk(sugg)
+    if _strict_hitl() and role not in risk["roles"]:
+        raise TransitionError(f"高风险建议需 {risk['roles']} 审批：{risk['reason']}")
     if sugg["status"] != "submitted":
         raise TransitionError(f"当前状态 {sugg['status']} 不可审批")
     if auth.AUTH_ENABLED and sugg["submitted_by"] == actor:

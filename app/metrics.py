@@ -43,22 +43,32 @@ def record(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     run_id: str | None = None,
+    provider: str = "",
+    prompt_name: str = "",
+    prompt_version: str = "",
+    trace_id: str = "",
+    cost: float | None = None,
 ) -> None:
     try:
         conn = db.connect()
         if db.BACKEND == "sqlite":
             conn.execute("PRAGMA busy_timeout = 500")
+        from .safety.redact import redact
+
+        detail = redact(detail or "")[0]
         try:
             conn.execute(
                 "INSERT INTO model_call (id, kind, model, ok, fallback, latency_ms,"
-                " detail, run_id, prompt_tokens, completion_tokens, cost, created_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " detail, run_id, prompt_tokens, completion_tokens, cost, provider,"
+                " prompt_name, prompt_version, trace_id, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     db.new_id(), kind, model, int(ok), int(fallback), latency_ms,
                     (detail or "")[:200],
                     run_id if run_id is not None else current_run_id(),
                     int(prompt_tokens or 0), int(completion_tokens or 0),
-                    _cost(prompt_tokens, completion_tokens), db.now_iso(),
+                    _cost(prompt_tokens, completion_tokens) if cost is None else cost,
+                    provider, prompt_name, prompt_version, trace_id, db.now_iso(),
                 ),
             )
             conn.commit()
@@ -115,7 +125,38 @@ def summary(conn, hours: int = 24) -> dict:
             round(tokens / DAILY_TOKEN_BUDGET, 3) if DAILY_TOKEN_BUDGET > 0 else None
         ),
         "by_kind": by_kind,
+        "by_model": _by_model(conn),
+        "p50_latency_ms": _percentile(latencies, 0.50),
+        "p99_latency_ms": _percentile(latencies, 0.99),
     }
+
+
+def _percentile(values: list[int], ratio: float) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, int(len(ordered) * ratio))
+    return ordered[index]
+
+
+def _by_model(conn) -> list[dict]:
+    rows = conn.execute(
+        "SELECT COALESCE(NULLIF(model, ''), 'unknown') AS model,"
+        " COUNT(*) AS calls, SUM(COALESCE(fallback, 0)) AS fallback,"
+        " SUM(COALESCE(prompt_tokens, 0) + COALESCE(completion_tokens, 0)) AS tokens,"
+        " SUM(COALESCE(cost, 0)) AS cost"
+        " FROM model_call GROUP BY COALESCE(NULLIF(model, ''), 'unknown')"
+        " ORDER BY calls DESC LIMIT 20"
+    ).fetchall()
+    return [
+        {
+            "model": row["model"], "calls": row["calls"],
+            "fallback": row["fallback"] or 0,
+            "tokens": int(row["tokens"] or 0),
+            "cost": round(float(row["cost"] or 0), 6),
+        }
+        for row in rows
+    ]
 
 
 def budget_exceeded() -> bool:

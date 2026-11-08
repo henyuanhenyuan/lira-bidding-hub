@@ -647,3 +647,46 @@ LIRA_TEST_DB=postgres python -m pytest -q
 - 向量已迁到 Qdrant；模型级 reranker 需自备服务，未配置时走规则重排
 - TLS 需外置反向代理（Caddy/Nginx），应用本身只监听 HTTP
 - 4B 模型的叙事质量一般，事实与数字仍由工具保证
+
+## 评测与模型网关（P5–P10）
+
+### 评测
+
+```bash
+python scripts/gen_golden_cases.py          # 生成 120 条金标
+python scripts/eval_gate.py --tier smoke    # PR 门禁（确定性，~5s）
+python scripts/eval_gate.py --tier full     # 全量（~16s）
+```
+
+- 金标：`app/evaluation/golden/agent_cases.jsonl`，五个场景（价格事件 / 护栏 / 注入对抗 / 低置信 / SOP 边界）。
+- 指标：动作准确率、证据闭包率、轨迹完整率；按 segment / difficulty 切片。
+- 坏例自动归档到 `eval_badcase`，接口 `GET /api/eval/badcases`。
+- 评测默认关闭模型（确定性），需要模型参与时传 `use_llm=True`。
+
+### 多 Provider 网关
+
+```bash
+export LIRA_LLM_BACKEND=gateway          # legacy（默认）| gateway
+export LIRA_OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+export LIRA_OPENAI_API_KEY=sk-xxx
+export LIRA_OPENAI_MODEL=qwen-plus
+export LIRA_LLM_ROUTE=auto               # auto | ollama | openai
+export LIRA_LLM_RPM=60
+```
+
+按任务类型路由，失败自动降级（退避 + 熔断 + 每请求限流），全部不可用时回落模板。
+调用记录写入 `model_call`，含 provider / prompt 版本 / token / 成本。
+
+### Agent 能力
+
+- 有界 ReAct：`LIRA_AGENT_LOOP=on`（默认），上限 `LIRA_AGENT_MAX_STEPS` / `LIRA_AGENT_MAX_SECONDS`。
+- 记忆：`agent_memory` 表，会话级 + 长期级，召回注入 facts。
+- 多 Agent 交接：`agent_step.kind='handoff'`，每次运行最多 2 次。
+- SOP 校验：`POST /api/skills/{id}/validate`。
+
+### 安全与可观测
+
+- 注入隔离：外部内容包 `<untrusted>`，上下文被污染时只保留只读工具（`LIRA_TAINT_ENFORCE=on`）。
+- PII 脱敏：手机号 / 身份证 / 银行卡 / 邮箱 / 地址，出站与日志均生效。
+- 审批分级：`GET /api/suggestions/{id}/risk`；`LIRA_HITL_STRICT=on` 时高风险动作需 admin。
+- 追踪：`GET /api/observability/traces`、`/{trace_id}`，前端「观测」页可视化 span 树。

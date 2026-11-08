@@ -13,11 +13,15 @@ from . import (
     collectors,
     config, connectors, csvimport, db, docs as doc_store, eval as eval_store,
     executor, gates, guardrail, ingest, inbox, metrics, nlq, notify,
-    review_queue, reviews as review_store, scheduler, skills, stream, vectorstore,
+    review_queue, reviews as review_store, scheduler, skills, stream, tracing,
+    vectorstore,
 )
+from . import llm
 from . import outcome as outcome_store
 from . import cases as case_store
 from .contracts import IngestBatch, PricePoint, SnapshotIn
+from .evaluation import report as eval_report
+from .evaluation import runner as eval_runner
 
 router = APIRouter()
 
@@ -439,6 +443,20 @@ def patch_skill(
             raise HTTPException(400, str(exc)) from exc
 
 
+@router.post("/api/skills/{skill_id}/validate")
+def validate_skill(
+    skill_id: str,
+    actor: str = Depends(auth.require_role("admin", "manager")),
+) -> dict[str, Any]:
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT playbook FROM skill WHERE id = ?", (skill_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "skill not found")
+    return skills.validate_playbook(row["playbook"])
+
+
 @router.get("/api/eval/cases")
 def eval_cases() -> list[dict[str, Any]]:
     with db.get_db() as conn:
@@ -448,9 +466,73 @@ def eval_cases() -> list[dict[str, Any]]:
 @router.post("/api/eval/run")
 def run_eval(
     limit: int | None = None,
+    tier: str | None = None,
     actor: str = Depends(auth.require_role("admin", "manager")),
 ) -> dict[str, Any]:
+    if tier:
+        return eval_runner.run(tier=tier, limit=limit)
     return eval_store.run(limit)
+
+
+@router.get("/api/eval/runs")
+def eval_runs(limit: int = 20) -> list[dict[str, Any]]:
+    return eval_runner.list_runs(limit)
+
+
+@router.get("/api/eval/badcases")
+def eval_badcases(run_key: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    return eval_runner.list_badcases(run_key, limit)
+
+
+@router.get("/api/eval/runs/{run_key}/report")
+def eval_report_md(run_key: str) -> Response:
+    run = next(
+        (item for item in eval_runner.list_runs(200) if item["run_key"] == run_key),
+        None,
+    )
+    if run is None:
+        raise HTTPException(404, "评测记录不存在")
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT results FROM eval_run WHERE run_key = ?", (run_key,)
+        ).fetchone()
+    results = json.loads(row["results"]) if row and row["results"] else []
+    text = eval_report.render(
+        {"run_key": run_key, "tier": run.get("tier"), "metrics": run.get("metrics"),
+         "results": results}
+    )
+    return Response(content=text, media_type="text/markdown; charset=utf-8")
+
+
+@router.get("/api/observability/traces")
+def trace_list(run_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    sql = "SELECT trace_id, COUNT(*) AS spans, MIN(started_at) AS started_at"
+    sql += " FROM span"
+    params: list[Any] = []
+    if run_id:
+        sql += " WHERE run_id = ?"
+        params.append(run_id)
+    sql += " GROUP BY trace_id ORDER BY started_at DESC LIMIT ?"
+    params.append(limit)
+    with db.get_db() as conn:
+        return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
+
+@router.get("/api/observability/traces/{trace_id}")
+def trace_detail(trace_id: str) -> dict[str, Any]:
+    return tracing.list_trace(trace_id)
+
+
+@router.get("/api/suggestions/{sid}/risk")
+def suggestion_risk(sid: str) -> dict[str, Any]:
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM suggestion WHERE id = ?", (sid,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "建议不存在")
+    risk = approval.assess_risk(row)
+    return {**risk, "roles": list(risk["roles"])}
 
 
 @router.get("/api/agent/runs/{run_id}")
@@ -1130,6 +1212,63 @@ def event_stream() -> StreamingResponse:
                 yield stream.format_sse(payload)
         finally:
             stream.unsubscribe(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _sse(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+@router.get("/api/events/{event_id}/analyze/stream")
+def analyze_stream(event_id: str) -> StreamingResponse:
+    """研判进度流：start → suggestion → narrative 分片 → done。"""
+
+    def gen():
+        yield _sse("start", {"event_id": event_id})
+        try:
+            result = agent_graph.run_for_event(event_id, trigger="api:stream")
+        except Exception as exc:  # 事件不存在等
+            yield _sse("error", {"detail": str(exc)})
+            return
+        yield _sse(
+            "suggestion",
+            {
+                "id": result.get("id"), "action": result.get("action"),
+                "confidence": result.get("confidence"),
+                "guardrail": result.get("guardrail"),
+            },
+        )
+        narrative = str(result.get("narrative") or "")
+        for index in range(0, len(narrative), 24):
+            yield _sse("narrative", {"text": narrative[index:index + 24]})
+        yield _sse("done", {"narrative": narrative})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/api/llm/stream")
+def llm_stream(
+    body: dict[str, Any],
+    actor: str = Depends(auth.require_role("admin")),
+) -> StreamingResponse:
+    """调试用：直接把网关的 token 流透出，验证多 Provider 流式能力。"""
+    messages = body.get("messages") or [
+        {"role": "user", "content": str(body.get("prompt") or "")},
+    ]
+
+    def gen():
+        for piece in llm.stream(messages, kind="analysis", max_tokens=256):
+            yield _sse("token", {"text": piece})
+        yield _sse("done", {})
 
     return StreamingResponse(
         gen(),

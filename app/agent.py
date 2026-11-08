@@ -8,7 +8,8 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import assertions, config, evidence, metrics
+from . import assertions, config, evidence, llm as llm_gateway, metrics
+from .safety import injection as injection_guard
 from .contracts import PricePoint
 
 log = logging.getLogger(__name__)
@@ -139,6 +140,8 @@ def _llm_available() -> bool:
         return False
     if config.LLM_ENABLED == "on":
         return True
+    if llm_gateway.gateway_enabled() and config.OPENAI_BASE_URL and config.OPENAI_API_KEY:
+        return True
     try:
         r = httpx.get(f"{config.OLLAMA_URL}/api/tags", timeout=1.0)
         return r.status_code == 200
@@ -181,6 +184,61 @@ def _post_chat(body: dict) -> dict:
     return r.json()
 
 
+def _call_gateway(facts: dict, allowed: set[str]) -> Analysis | None:
+    """走多 Provider 网关；校验规则与直连路径完全一致。"""
+    started = time.perf_counter()
+    response = llm_gateway.complete(
+        [
+            {"role": "system", "content": PROMPT},
+            {
+                "role": "user",
+                "content": json.dumps(
+                    {"facts": facts, "allowed_evidence_ids": sorted(allowed)},
+                    ensure_ascii=False,
+                ),
+            },
+        ],
+        kind="attribution",
+        prompt_name="analysis",
+        schema=OUTPUT_SCHEMA,
+        max_tokens=200,
+        temperature=0.1,
+    )
+    if response is None:
+        return None
+    data = _extract_json(response.text)
+    if data is None:
+        metrics.record(
+            "attribution", model=response.model, ok=False, fallback=True,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            detail="gateway: no parsable JSON", provider=response.provider,
+            prompt_name="analysis",
+        )
+        return None
+    action = data.get("action")
+    ids = data.get("evidence_ids") or []
+    if action not in ACTIONS or not isinstance(ids, list):
+        return None
+    check = evidence.validate([str(i) for i in ids], allowed)
+    if not check.ok:
+        return None
+    violations = assertions.verify(
+        str(data.get("narrative", "")), allowed=assertions.facts_to_numbers(facts)
+    )
+    if violations:
+        return None
+    conf = evidence.confidence_ceiling(
+        len(check.valid), max(0.0, min(1.0, float(data.get("confidence", 0.5))))
+    )
+    return Analysis(
+        action=action,
+        confidence=round(conf, 3),
+        narrative=str(data.get("narrative", ""))[:200],
+        evidence_ids=check.valid,
+        generated_by=f"llm:{response.model}",
+    )
+
+
 def _call_llm(
     facts: dict,
     allowed: set[str],
@@ -212,6 +270,9 @@ def _call_llm(
             detail="token budget exceeded",
         )
         return None
+
+    if llm_gateway.gateway_enabled():
+        return _call_gateway(facts, allowed)
 
     started = time.perf_counter()
     prompt_tokens = 0
@@ -403,7 +464,10 @@ def analyze(
                 "id": f"doc:{d['id']}",
                 "title": d.get("doc_title"),
                 "chunk_no": d.get("chunk_no"),
-                "content": d.get("content"),
+                "content": injection_guard.wrap_untrusted(
+                    str(d.get("content") or ""), source=f"doc:{d['id']}"
+                ),
+                "injection": injection_guard.scan(str(d.get("content") or "")).hits,
             }
             for d in docs
         ],
@@ -447,6 +511,31 @@ def critic_review(
             detail="token budget exceeded",
         )
         return None
+    if llm_gateway.gateway_enabled():
+        response = llm_gateway.complete(
+            [
+                {"role": "system", "content": CRITIC_PROMPT},
+                {
+                    "role": "user",
+                    "content": json.dumps(
+                        {"facts": facts, "analysis": analysis,
+                         "allowed_evidence_ids": allowed},
+                        ensure_ascii=False,
+                    ),
+                },
+            ],
+            kind="critic",
+            prompt_name="critic",
+            schema=CRITIC_SCHEMA,
+            max_tokens=160,
+        )
+        if response is None:
+            return None
+        data = _extract_json(response.text)
+        if not data or data.get("verdict") not in ("approve", "reject"):
+            return None
+        issues = [str(item)[:120] for item in (data.get("issues") or [])][:5]
+        return {"verdict": data["verdict"], "issues": issues}
     body = {
         "model": config.OLLAMA_MODEL,
         "stream": False,

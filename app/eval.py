@@ -192,12 +192,16 @@ def _trace_kinds(run_id: str) -> list[str]:
     return [row["kind"] for row in rows]
 
 
-def run(limit: int | None = None) -> dict[str, Any]:
+def run(
+    limit: int | None = None, names: set[str] | None = None
+) -> dict[str, Any]:
     with db.get_db() as conn:
         ensure_cases(conn)
         cases = conn.execute(
             "SELECT * FROM eval_case ORDER BY created_at, name"
         ).fetchall()
+    if names is not None:
+        cases = [case for case in cases if case["name"] in names]
     if limit:
         cases = cases[:limit]
 

@@ -1,26 +1,43 @@
 import { useState } from "react";
 
-import { api } from "../api";
+import { api, query } from "../api";
 import { useAuth } from "../auth";
 import { Card, Empty, ErrorBox, Loader, Metric, PageHead } from "../components/ui";
 import { formatTs, percent } from "../format";
 import { useAsync } from "../hooks";
 import { ACTION_TEXT } from "../labels";
-import type { EvalCase, EvalRun, GateStatus } from "../types";
+import type {
+  EvalBadcase,
+  EvalCase,
+  EvalRun,
+  EvalRunSummary,
+  GateStatus,
+} from "../types";
+
+const TIERS = [
+  { value: "smoke", label: "冒烟（easy）" },
+  { value: "core", label: "核心（easy+medium）" },
+  { value: "full", label: "全量（120 条）" },
+];
 
 export default function EvalPage() {
   const { me } = useAuth();
   const canRun = me?.role === "admin" || me?.role === "manager";
   const { data, error, loading, reload } = useAsync(async () => {
-    const [cases, gate] = await Promise.all([
+    const [cases, gate, runs, badcases] = await Promise.all([
       api.get<EvalCase[]>("/api/eval/cases"),
       api.get<GateStatus>("/api/gates"),
+      api.get<EvalRunSummary[]>("/api/eval/runs" + query({ limit: 10 })),
+      api.get<EvalBadcase[]>("/api/eval/badcases" + query({ limit: 20 })),
     ]);
-    return { cases, gate };
+    return { cases, gate, runs, badcases };
   }, []);
   const cases = data?.cases;
   const gate = data?.gate;
+  const runs = data?.runs ?? [];
+  const badcases = data?.badcases ?? [];
 
+  const [tier, setTier] = useState("smoke");
   const [run, setRun] = useState<EvalRun | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -29,7 +46,7 @@ export default function EvalPage() {
     setBusy(true);
     setMessage("");
     try {
-      setRun(await api.post<EvalRun>("/api/eval/run"));
+      setRun(await api.post<EvalRun>("/api/eval/run" + query({ tier })));
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "评测失败");
@@ -42,12 +59,25 @@ export default function EvalPage() {
     <>
       <PageHead
         title="评测"
-        sub="金标事件跑完整 Agent 链路：事件判定、动作、证据与护栏"
+        sub="金标事件跑完整 Agent 链路：事件判定、动作、证据、轨迹与检索指标"
         actions={
           canRun ? (
-            <button className="btn" disabled={busy} onClick={() => void execute()}>
-              {busy ? "评测中…" : "运行评测"}
-            </button>
+            <div className="row">
+              <select
+                className="input"
+                value={tier}
+                onChange={(event) => setTier(event.target.value)}
+              >
+                {TIERS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <button className="btn" disabled={busy} onClick={() => void execute()}>
+                {busy ? "评测中…" : "运行评测"}
+              </button>
+            </div>
           ) : undefined
         }
       />
@@ -96,11 +126,11 @@ export default function EvalPage() {
               sub={`${run.passed} / ${run.total}`}
               tone={run.passed === run.total ? "ok" : "danger"}
             />
-            <Metric label="用例数" value={run.total} sub="金标 + 自定义" />
+            <Metric label="用例数" value={run.total} sub={`tier=${tier}`} />
             <Metric
               label="失败"
               value={run.total - run.passed}
-              sub={run.passed === run.total ? "全部通过" : "需要复盘"}
+              sub={run.passed === run.total ? "全部通过" : "见下方坏例"}
               tone={run.passed === run.total ? "ok" : "warn"}
             />
             <Metric label="批次" value={run.run_key} sub="评测数据已自动清理" />
@@ -151,12 +181,80 @@ export default function EvalPage() {
 
       {error && <ErrorBox message={error} />}
       {loading && !cases && <Loader />}
+
+      <Card title="历史批次" sub="按 tier 记录，可回看分维度分数">
+        {runs.length === 0 ? (
+          <Empty>还没有评测记录。</Empty>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>批次</th>
+                  <th>Tier</th>
+                  <th>通过</th>
+                  <th>动作准确率</th>
+                  <th>证据闭包率</th>
+                  <th>时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((item) => {
+                  const metrics = (item.metrics ?? {}) as Record<string, number>;
+                  return (
+                    <tr key={item.run_key}>
+                      <td className="mono">{item.run_key}</td>
+                      <td>{item.tier ?? "legacy"}</td>
+                      <td className="num">
+                        {item.passed}/{item.total}
+                      </td>
+                      <td className="num">{percent(metrics.action_accuracy ?? 0)}</td>
+                      <td className="num">{percent(metrics.evidence_closure_rate ?? 0)}</td>
+                      <td>{formatTs(item.created_at)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="坏例库" sub="每次评测失败的用例会自动归档">
+        {badcases.length === 0 ? (
+          <Empty>暂无坏例。</Empty>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>用例</th>
+                  <th>场景</th>
+                  <th>难度</th>
+                  <th>原因</th>
+                </tr>
+              </thead>
+              <tbody>
+                {badcases.map((item, index) => (
+                  <tr key={`${item.case_name}-${index}`}>
+                    <td>{item.case_name}</td>
+                    <td>{item.segment}</td>
+                    <td>{item.difficulty}</td>
+                    <td className="note-cell">{item.reason}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       {cases && cases.length === 0 && <Empty>还没有金标用例。</Empty>}
 
       {cases && cases.length > 0 && (
         <Card
           title="金标用例"
-          sub="每条用例都会在独立目标上执行，结束后自动删除"
+          sub={`共 ${cases.length} 条；tier 由难度决定，smoke ⊆ core ⊆ full`}
         >
           <div className="table-wrap">
             <table className="table">

@@ -1,0 +1,9 @@
+{
+  "tier": "smoke",
+  "metrics": {
+    "action_accuracy": 1.0,
+    "evidence_closure_rate": 1.0,
+    "trace_completion_rate": 1.0
+  },
+  "run_key": "358b9e82"
+}

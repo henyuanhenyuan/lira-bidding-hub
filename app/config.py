@@ -10,11 +10,25 @@ DATABASE_URL = os.getenv("LIRA_DATABASE_URL", "")
 WEB_DIR = BASE_DIR / "web"
 NEXT_DIR = BASE_DIR / "web-next" / "dist"
 
-# 本地模型（可选）。不可用时全部走确定性模板。
+# 模型通道。legacy = 旧的直连 Ollama；gateway = 多 Provider 路由（推荐）。
+# 本地 Ollama 适合开发与离线演示；对外演示/生产建议走 OpenAI 兼容通道（qwen-plus / DeepSeek）。
 OLLAMA_URL = os.getenv("LIRA_OLLAMA_URL", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("LIRA_OLLAMA_MODEL", "qwen3:4b")
+OLLAMA_MODEL = os.getenv("LIRA_OLLAMA_MODEL", "qwen3:14b")
 LLM_TIMEOUT_S = float(os.getenv("LIRA_LLM_TIMEOUT", "20"))
 LLM_ENABLED = os.getenv("LIRA_LLM", "auto")  # auto | off | on
+
+LLM_BACKEND = os.getenv("LIRA_LLM_BACKEND", "legacy")  # legacy | gateway
+LLM_ROUTE = os.getenv("LIRA_LLM_ROUTE", "auto")        # auto | ollama | openai
+OPENAI_BASE_URL = os.getenv("LIRA_OPENAI_BASE_URL", "")
+OPENAI_API_KEY = os.getenv("LIRA_OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("LIRA_OPENAI_MODEL", "qwen-plus")
+JUDGE_MODEL = os.getenv("LIRA_JUDGE_MODEL", "")
+LLM_RPM = int(os.getenv("LIRA_LLM_RPM", "60"))
+LLM_MAX_RETRIES = int(os.getenv("LIRA_LLM_MAX_RETRIES", "2"))
+LLM_MAX_PROMPT_TOKENS = int(os.getenv("LIRA_LLM_MAX_PROMPT_TOKENS", "6000"))
+AGENT_MAX_STEPS = int(os.getenv("LIRA_AGENT_MAX_STEPS", "6"))
+AGENT_MAX_SECONDS = float(os.getenv("LIRA_AGENT_MAX_SECONDS", "90"))
+TAINT_ENFORCE = os.getenv("LIRA_TAINT_ENFORCE", "on") == "on"
 
 # 采集与告警阈值
 PRICE_DELTA_ALERT = 0.03          # 3% 触发价格事件

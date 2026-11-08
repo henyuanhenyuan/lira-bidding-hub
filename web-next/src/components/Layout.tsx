@@ -50,6 +50,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { to: "/ask", label: "问数", icon: "ask" },
       { to: "/skills", label: "Skill 管理", icon: "skills", staffOnly: true },
       { to: "/eval", label: "评测", icon: "eval", staffOnly: true },
+      { to: "/observability", label: "观测", icon: "trace", staffOnly: true },
       { to: "/admin", label: "账号", icon: "admin", adminOnly: true },
     ],
   },

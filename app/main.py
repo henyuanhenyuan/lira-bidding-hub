@@ -81,8 +81,20 @@ def login_page() -> Response:
 
 @app.get("/", response_class=HTMLResponse)
 def index(request: Request) -> Response:
+    """默认入口收敛到 React 工作台；未构建时回落到旧版。"""
     if auth.AUTH_ENABLED and not auth.verify_token(request.cookies.get(auth.COOKIE)):
         return RedirectResponse("/login", status_code=303)
+    if (config.NEXT_DIR / "index.html").exists():
+        return RedirectResponse("/next", status_code=303)
+    idx = config.WEB_DIR / "index.html"
+    if idx.exists():
+        return FileResponse(idx)
+    return HTMLResponse(FALLBACK)
+
+
+@app.get("/legacy", response_class=HTMLResponse)
+def legacy_app() -> Response:
+    """旧版界面保留一个版本，供尚未迁移的页面使用。"""
     idx = config.WEB_DIR / "index.html"
     if idx.exists():
         return FileResponse(idx)

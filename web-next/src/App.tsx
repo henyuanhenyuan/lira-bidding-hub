@@ -20,6 +20,7 @@ import ImportPage from "./pages/ImportPage";
 import Skills from "./pages/Skills";
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Observability from "./pages/Observability";
 import Outcomes from "./pages/Outcomes";
 import Overview from "./pages/Overview";
 import SuggestionDetail from "./pages/SuggestionDetail";
@@ -61,6 +62,7 @@ export default function App() {
           <Route path="agent/:id" element={<AgentTrace />} />
           <Route path="skills" element={<Skills />} />
           <Route path="eval" element={<EvalPage />} />
+          <Route path="observability" element={<Observability />} />
           <Route path="collection" element={<Collection />} />
           <Route path="collect-logs" element={<CollectLogs />} />
           <Route path="import" element={<ImportPage />} />

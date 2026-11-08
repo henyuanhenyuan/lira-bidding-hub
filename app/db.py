@@ -309,9 +309,59 @@ CREATE TABLE IF NOT EXISTS eval_run (
   passed INTEGER NOT NULL,
   accuracy REAL NOT NULL,
   results TEXT NOT NULL,
+  tier TEXT,
+  metrics TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_eval_run_created ON eval_run(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS eval_badcase (
+  id TEXT PRIMARY KEY,
+  run_key TEXT NOT NULL,
+  case_name TEXT NOT NULL,
+  segment TEXT,
+  difficulty TEXT,
+  reason TEXT,
+  detail TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_eval_badcase_run ON eval_badcase(run_key);
+
+CREATE TABLE IF NOT EXISTS judge_cache (
+  key TEXT PRIMARY KEY,
+  model TEXT NOT NULL,
+  rubric_version TEXT NOT NULL,
+  verdict TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS agent_memory (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
+  kind TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  payload TEXT,
+  weight REAL NOT NULL DEFAULT 1.0,
+  created_at TEXT NOT NULL,
+  last_used TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_agent_memory_run ON agent_memory(run_id);
+
+CREATE TABLE IF NOT EXISTS span (
+  id TEXT PRIMARY KEY,
+  trace_id TEXT NOT NULL,
+  parent_id TEXT,
+  run_id TEXT,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attributes TEXT,
+  started_at TEXT,
+  duration_ms INTEGER,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_span_trace ON span(trace_id);
 
 CREATE TABLE IF NOT EXISTS execution (
   id TEXT PRIMARY KEY,
@@ -566,9 +616,15 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "model_call", "prompt_tokens", "INTEGER")
     _ensure_column(conn, "model_call", "completion_tokens", "INTEGER")
     _ensure_column(conn, "model_call", "cost", "REAL")
+    _ensure_column(conn, "model_call", "provider", "TEXT")
+    _ensure_column(conn, "model_call", "prompt_name", "TEXT")
+    _ensure_column(conn, "model_call", "prompt_version", "TEXT")
+    _ensure_column(conn, "model_call", "trace_id", "TEXT")
     _ensure_column(conn, "agent_run", "prompt_tokens", "INTEGER")
     _ensure_column(conn, "agent_run", "completion_tokens", "INTEGER")
     _ensure_column(conn, "agent_run", "cost", "REAL")
+    _ensure_column(conn, "eval_run", "tier", "TEXT")
+    _ensure_column(conn, "eval_run", "metrics", "TEXT")
 
 
 def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
