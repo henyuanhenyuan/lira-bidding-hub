@@ -1694,49 +1694,6 @@ input[type="range"].input:focus {
   padding: 8px 12px;
   border-radius: 10px;
 }
-.accounts {
-  margin-top: 20px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-}
-.accounts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 10px;
-}
-.account-chip {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.025);
-  font-size: 11.5px;
-  transition: 0.16s ease;
-  text-align: left;
-}
-.account-chip:hover {
-  border-color: var(--line-2);
-  background: rgba(255, 255, 255, 0.06);
-}
-.account-chip .avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
-  font-size: 11px;
-}
-.account-chip strong {
-  display: block;
-  font-weight: 600;
-}
-.account-chip span {
-  display: block;
-  font-size: 10px;
-  color: var(--muted);
-}
-
 /* ---------- big screen ---------- */
 
 .screen {

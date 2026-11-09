@@ -4,18 +4,10 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../core/auth";
 import { Icon } from "../ui/icons";
 
-const ACCOUNTS = [
-  { username: "admin", password: "Lira@Admin2026", name: "林澈", role: "负责人" },
-  { username: "manager", password: "Lira@Manager2026", name: "周遥", role: "竞价主管" },
-  { username: "analyst", password: "Lira@Analyst2026", name: "陈粟", role: "价格分析师" },
-  { username: "operator", password: "Lira@Ops2026", name: "许棠", role: "运营执行" },
-  { username: "viewer", password: "Lira@View2026", name: "顾言", role: "只读观察" },
-];
-
 export default function Login() {
   const { login, me } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,11 +16,11 @@ export default function Login() {
     if (me) navigate("/", { replace: true });
   }, [me, navigate]);
 
-  async function submit(name = username, secret = password) {
+  async function submit() {
     setBusy(true);
     setError(null);
     try {
-      await login(name, secret);
+      await login(username, password);
       navigate("/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败，请重试");
@@ -109,30 +101,6 @@ export default function Login() {
             {!busy && <Icon name="arrow" size={16} />}
           </button>
         </form>
-
-        <div className="accounts">
-          <span className="eyebrow">租户成员 · 点击直接进入</span>
-          <div className="accounts-grid">
-            {ACCOUNTS.map((account) => (
-              <button
-                type="button"
-                key={account.username}
-                className="account-chip"
-                onClick={() => {
-                  setUsername(account.username);
-                  setPassword(account.password);
-                  void submit(account.username, account.password);
-                }}
-              >
-                <span className="avatar">{account.name.slice(0, 1)}</span>
-                <span>
-                  <strong>{account.name}</strong>
-                  <span>{account.role}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );
