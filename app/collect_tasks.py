@@ -5,7 +5,7 @@ from typing import Any
 
 from . import db
 
-CHANNELS = ("api", "rpa", "manual")
+CHANNELS = ("api", "rpa", "manual", "yingren", "native")
 STATUSES = ("pending", "running", "done", "failed", "cancelled")
 
 

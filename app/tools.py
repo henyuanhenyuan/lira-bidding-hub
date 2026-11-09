@@ -192,6 +192,42 @@ def get_event(args: dict) -> dict:
     return result
 
 
+def bid_ledger(args: dict) -> dict:
+    region = args.get("region") or None
+    limit = _int_arg(args, "limit", 20, 1, 100)
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM bid_ledger"
+            + (" WHERE region = ?" if region else "")
+            + " ORDER BY created_at DESC LIMIT ?",
+            ((region, limit) if region else (limit,)),
+        ).fetchall()
+    return {"region": region, "count": len(rows), "items": [dict(r) for r in rows]}
+
+
+def autopilot_exceptions(args: dict) -> dict:
+    limit = _int_arg(args, "limit", 20, 1, 100)
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT s.id, s.action, s.target_price, s.confidence, s.exception_reason,"
+            " s.created_at, e.target_id FROM suggestion s"
+            " LEFT JOIN event e ON e.id = s.event_id"
+            " WHERE s.exception = 1 AND s.status IN ('pending','submitted')"
+            " ORDER BY s.created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return {"count": len(rows), "items": [dict(r) for r in rows]}
+
+
+def region_summary(_: dict) -> dict:
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT region, COUNT(*) AS targets, COALESCE(AVG(my_price),0) AS avg_price"
+            " FROM target WHERE active = 1 GROUP BY region ORDER BY region"
+        ).fetchall()
+    return {"count": len(rows), "items": [dict(r) for r in rows]}
+
+
 TOOLS: dict[str, Tool] = {
     "price_history": Tool(
         name="price_history",
@@ -274,6 +310,35 @@ TOOLS: dict[str, Tool] = {
             "required": ["event_id"],
         },
         handler=get_event,
+    ),
+    "bid_ledger": Tool(
+        name="bid_ledger",
+        description="读取自主竞价流水：每次自动调价或异常升级的来源、前后价与护栏结果。",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "region": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+        },
+        handler=bid_ledger,
+    ),
+    "autopilot_exceptions": Tool(
+        name="autopilot_exceptions",
+        description="读取当前需要人工确认的异常调价，包含触发原因。",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20},
+            },
+        },
+        handler=autopilot_exceptions,
+    ),
+    "region_summary": Tool(
+        name="region_summary",
+        description="按地区汇总在售目标与平均价，用于多地区竞价概览。",
+        input_schema={"type": "object", "properties": {}},
+        handler=region_summary,
     ),
 }
 

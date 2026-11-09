@@ -4,14 +4,14 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable
 
 from . import alignment, backup, config, db, outcome
 
 log = logging.getLogger(__name__)
 
-MODE = os.getenv("LIRA_SCHEDULER", "celery")  # celery | thread | off
+MODE = os.getenv("LIRA_SCHEDULER", "thread")  # celery | thread | off
 ENABLED = MODE != "off"
 
 _last: dict[str, str] = {}
@@ -47,9 +47,38 @@ def job_backup() -> str:
     return f"{result['path']} ({result['size_kb']}KB, kept {result['kept']})"
 
 
+def run_autopilot(limit: int = 20) -> int:
+    """扫描最近未被研判的事件，交给 Agent 自动跑一轮。"""
+    from . import agent_graph
+
+    ran = 0
+    since = (datetime.now() - timedelta(hours=24)).isoformat(timespec="seconds")
+    with db.get_db() as conn:
+        rows = conn.execute(
+            "SELECT e.id FROM event e"
+            " LEFT JOIN suggestion s ON s.event_id = e.id"
+            " WHERE e.suppressed = 0 AND s.id IS NULL AND e.ts >= ?"
+            " ORDER BY e.ts DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+    for row in rows:
+        try:
+            agent_graph.run_for_event(row["id"], trigger="scheduler")
+            ran += 1
+        except Exception:
+            log.exception("autopilot event %s failed", row["id"])
+    return ran
+
+
+def job_autopilot() -> str:
+    ran = run_autopilot()
+    return f"{ran} events" if ran else "no events"
+
+
 JOBS: dict[str, tuple[float, Callable[[], str]]] = {
     "mapping_suggest": (3600, job_mapping_suggest),
     "outcome_review": (900, job_outcome_review),
+    "autopilot": (float(os.getenv("LIRA_AUTOPILOT_INTERVAL", "120")), job_autopilot),
 }
 
 

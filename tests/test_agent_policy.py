@@ -26,7 +26,8 @@ def test_llm_cannot_override_action_policy(monkeypatch):
         narrative="模型建议直接跟价", evidence_ids=["e1"], generated_by="llm:test",
     )
     out = call(monkeypatch, fake)
-    assert out.action == "adjust_coupon"
+    # L3 降价由确定性策略升级为自主调价，模型仍只负责措辞
+    assert out.action == "adjust_price"
     assert out.narrative == "模型建议直接跟价"
     assert out.generated_by == "llm:test"
 

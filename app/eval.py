@@ -31,9 +31,9 @@ def _snap(ts: str, price: float, tier: int, title: str, complete: bool = True) -
 GOLDEN_CASES = [
     {
         "name": "L3 降价（三方源）",
-        "expected_action": "adjust_coupon",
+        "expected_action": "adjust_price",
         "expected_event_type": "price_drop",
-        "notes": "299 → 199，-33%，L3 状态应给投券对冲",
+        "notes": "299 → 199，-33%，L3 状态进入自主调价策略",
         "payload": {
             "snapshots": [
                 _snap("2026-10-20T02:00:00+08:00", 299, 1, "评测竞品A"),
@@ -67,7 +67,7 @@ GOLDEN_CASES = [
     },
     {
         "name": "价格带击穿",
-        "expected_action": "follow",
+        "expected_action": "adjust_price",
         "expected_event_type": "band_breach",
         "notes": "我方 100，竞品 99 → 89，击穿价格带",
         "payload": {

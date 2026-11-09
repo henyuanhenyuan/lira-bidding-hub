@@ -229,7 +229,7 @@ def get_sources(actor: str = Depends(auth.require_role("admin", "manager"))) -> 
             "url": "/v1/ingest/snapshots",
             "has_token": bool(os.getenv("LIRA_INGEST_TOKEN", "")),
         },
-        "file": {"formats": ["csv", "json"], "endpoint": "/api/import/file"},
+        "file": {"formats": ["csv", "xlsx", "xlsm", "json"], "endpoint": "/api/import/file"},
     }
 
 

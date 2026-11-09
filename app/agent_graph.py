@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from typing import Any, TypedDict
 
 from . import (
     agent, cases as case_store, config, db, guardrail, handoff, llm, memory,
-    metrics, safety, skills, stream, tools, tracing,
+    metrics, pricing, safety, skills, stream, tools, tracing,
 )
 from .contracts import PricePoint
 
@@ -29,6 +30,7 @@ class AgentState(TypedDict, total=False):
     allowed_evidence: list[str]
     tainted: bool
     analysis: dict[str, Any]
+    pricing: dict[str, Any]
     checks: dict[str, Any]
     risk: dict[str, Any]
     proposal: dict[str, Any]
@@ -176,6 +178,8 @@ def _load_context(state: AgentState) -> AgentState:
             "prev_point": prev_point,
             "my_price": target["my_price"] if target else None,
             "my_sku": target["my_sku"] if target else None,
+            "region": (target["region"] if target else None) or "全国",
+            "strategy": (target["pricing_strategy"] if target else None) or "follow",
             "holdout": bool(target["holdout"]) if target else False,
             "cost": product["cost"] if product else None,
             "margin_floor": (
@@ -726,18 +730,57 @@ def _verify_node(state: AgentState) -> AgentState:
     return {"analysis": analysis, "checks": checks, "seq": seq}
 
 
-def _risk_node(state: AgentState) -> AgentState:
+def _price_node(state: AgentState) -> AgentState:
+    """Pricer Agent：按确定性策略给出目标价，模型不参与定价。"""
     run_id = state["run_id"]
     seq = state.get("seq", 0) + 1
     started = time.perf_counter()
     facts = state["facts"]
     analysis = state["analysis"]
 
-    target_price = (
-        round(facts["point"], 2)
-        if analysis["action"] in ("follow", "adjust_coupon")
-        else None
+    from . import autopilot
+
+    cfg = autopilot.config()
+    point = PricePoint(
+        target_id=facts["target_id"], ts=facts["ts"], point=facts["point"],
+        price_low=facts["price_low"], price_high=facts["price_high"],
+        confidence=facts["confidence"], missing_fields=facts["missing_fields"],
     )
+    if analysis["action"] in ("adjust_price", "follow"):
+        plan = pricing.propose(
+            point, facts.get("my_price"), facts.get("cost"),
+            facts.get("margin_floor", 0.15),
+            strategy=facts.get("strategy") or cfg["strategy"],
+            undercut_pct=cfg["undercut_pct"],
+            max_delta_pct=cfg["max_delta_pct"],
+        )
+    else:
+        plan = pricing.propose(
+            point, facts.get("my_price"), facts.get("cost"),
+            facts.get("margin_floor", 0.15), strategy="hold",
+        )
+    payload = plan.as_dict()
+    _step(
+        run_id, seq, "pricing", "调价策略", {"action": analysis["action"]},
+        payload, latency_ms=int((time.perf_counter() - started) * 1000),
+    )
+    out: dict[str, Any] = {"pricing": payload, "seq": seq}
+    if plan.action == "hold" and analysis["action"] in ("adjust_price", "follow"):
+        out["analysis"] = {**analysis, "action": "hold"}
+    return out  # type: ignore[return-value]
+
+
+def _risk_node(state: AgentState) -> AgentState:
+    run_id = state["run_id"]
+    seq = state.get("seq", 0) + 1
+    started = time.perf_counter()
+    facts = state["facts"]
+    analysis = state["analysis"]
+    pricing_plan = state.get("pricing") or {}
+
+    target_price = pricing_plan.get("target_price")
+    if analysis["action"] in ("follow", "adjust_coupon") and target_price is None:
+        target_price = round(facts["point"], 2)
     check = guardrail.evaluate(
         target_price, facts.get("cost"), facts.get("margin_floor", 0.15)
     )
@@ -795,9 +838,11 @@ def _propose_node(state: AgentState) -> AgentState:
     proposal = state.get("proposal") or {}
     risk_payload = state.get("risk") or {}
     check = risk_payload.get("guardrail") or {}
+    pricing_plan = state.get("pricing") or {}
     impact_low = proposal.get("impact_low")
     impact_high = proposal.get("impact_high")
-    target_price = proposal.get("target_price")
+    target_price = pricing_plan.get("target_price")
+    review_reasons = pricing_plan.get("reasons") or []
 
     suggestion_id = db.new_id()
     with db.get_db() as conn:
@@ -805,8 +850,8 @@ def _propose_node(state: AgentState) -> AgentState:
             "INSERT INTO suggestion (id, event_id, action, impact_low, impact_high,"
             " confidence, gate_level, narrative, generated_by, case_ids,"
             " target_price, margin_at_target, margin_floor, guardrail, guardrail_note,"
-            " status, created_at, agent_run_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " status, mode, exception, exception_reason, created_at, agent_run_id)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 suggestion_id, state["event_id"], analysis["action"],
                 impact_low, impact_high, analysis["confidence"], facts["gate_level"],
@@ -816,6 +861,8 @@ def _propose_node(state: AgentState) -> AgentState:
                 risk_payload.get("floor", facts.get("margin_floor", 0.15)),
                 check.get("status", "unknown"), check.get("guardrail_note"),
                 "holdout" if facts.get("holdout") else "pending",
+                "manual", 1 if review_reasons else 0,
+                "；".join(review_reasons)[:500] if review_reasons else None,
                 db.now_iso(), run_id,
             ),
         )
@@ -840,6 +887,15 @@ def _propose_node(state: AgentState) -> AgentState:
         {"suggestion_id": suggestion_id, "guardrail": check.get("status", "unknown")},
         latency_ms=int((time.perf_counter() - started) * 1000),
     )
+    # 建议落库后立即分流：能自动执行的直接执行，异常进待确认队列
+    try:
+        from . import autopilot
+
+        suggestion["autopilot"] = autopilot.apply(suggestion_id)
+    except Exception as exc:  # 自动分流失败不应让整次研判作废
+        logging.getLogger(__name__).exception("autopilot failed for %s", suggestion_id)
+        suggestion["autopilot"] = {"error": str(exc)}
+
     return {"suggestion": suggestion, "seq": seq}
 
 
@@ -853,6 +909,7 @@ def _build_graph():
     graph.add_node("react", _react_node)
     graph.add_node("steward", _steward_node)
     graph.add_node("analysis", _analyze_node)
+    graph.add_node("pricing_agent", _price_node)
     graph.add_node("risk", _risk_node)
     graph.add_node("verification", _verify_node)
     graph.add_node("writer", _writer_node)
@@ -866,7 +923,8 @@ def _build_graph():
         {"steward": "steward", "analysis": "analysis"},
     )
     graph.add_edge("steward", "analysis")
-    graph.add_edge("analysis", "risk")
+    graph.add_edge("analysis", "pricing_agent")
+    graph.add_edge("pricing_agent", "risk")
     graph.add_edge("risk", "verification")
     graph.add_edge("verification", "writer")
     graph.add_edge("writer", "suggest")
@@ -880,7 +938,10 @@ def _run_without_langgraph(state: AgentState) -> AgentState:
         final.update(node(final))  # type: ignore[arg-type]
     if "steward" in _stages(final):
         final.update(_steward_node(final))  # type: ignore[arg-type]
-    for node in (_analyze_node, _risk_node, _verify_node, _writer_node, _propose_node):
+    for node in (
+        _analyze_node, _price_node, _risk_node, _verify_node, _writer_node,
+        _propose_node,
+    ):
         final.update(node(final))  # type: ignore[arg-type]
     return final  # type: ignore[return-value]
 

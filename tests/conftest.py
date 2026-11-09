@@ -6,6 +6,8 @@ os.environ["LIRA_LLM"] = "off"
 os.environ["LIRA_SCHEDULER"] = "off"
 os.environ["LIRA_CELERY_EAGER"] = "1"
 os.environ["LIRA_AUTH"] = "off"
+# 默认关闭自动驾驶，手动审批链路单独测试；autopilot 测试用 monkeypatch 打开
+os.environ["LIRA_AUTOPILOT"] = "off"
 
 
 
@@ -45,6 +47,7 @@ from app import db  # noqa: E402
 TABLES = [
     "action_log",
     "outcome",
+    "bid_ledger",
     "suggestion",
     "event",
     "price_point",

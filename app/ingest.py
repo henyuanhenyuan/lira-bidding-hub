@@ -36,14 +36,20 @@ def _content_hash(snap: SnapshotIn) -> str:
 
 
 def _ensure_target(conn, snap: SnapshotIn) -> None:
-    row = conn.execute("SELECT id FROM target WHERE id = ?", (snap.target_id,)).fetchone()
+    row = conn.execute("SELECT id, region FROM target WHERE id = ?", (snap.target_id,)).fetchone()
+    region = snap.observation.region
     if row:
+        # 地区是动态维度：采集端带来新地区时跟随更新，未带则保持原值
+        if region and region != row["region"]:
+            conn.execute(
+                "UPDATE target SET region = ? WHERE id = ?", (region, snap.target_id)
+            )
         return
     title = snap.observation.title or snap.target_id
     conn.execute(
-        "INSERT INTO target (id, platform, external_id, title, my_sku, my_price, active)"
-        " VALUES (?, 'taobao', ?, ?, NULL, NULL, 1)",
-        (snap.target_id, snap.target_id, title),
+        "INSERT INTO target (id, platform, external_id, title, my_sku, my_price,"
+        " region, active) VALUES (?, 'taobao', ?, ?, NULL, NULL, ?, 1)",
+        (snap.target_id, snap.target_id, title, region or "全国"),
     )
 
 

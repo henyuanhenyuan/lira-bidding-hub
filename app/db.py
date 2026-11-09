@@ -20,6 +20,10 @@ CREATE TABLE IF NOT EXISTS target (
   title TEXT NOT NULL,
   my_sku TEXT,
   my_price REAL,
+  region TEXT NOT NULL DEFAULT '全国',
+  pricing_strategy TEXT NOT NULL DEFAULT 'follow',
+  url TEXT,
+  price_selector TEXT,
   active INTEGER NOT NULL DEFAULT 1
 );
 
@@ -74,6 +78,11 @@ CREATE TABLE IF NOT EXISTS suggestion (
   narrative TEXT NOT NULL,
   generated_by TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
+  mode TEXT NOT NULL DEFAULT 'manual',
+  exception INTEGER NOT NULL DEFAULT 0,
+  exception_reason TEXT,
+  decided_at TEXT,
+  decision_meta TEXT,
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_suggestion_event ON suggestion(event_id);
@@ -374,6 +383,31 @@ CREATE TABLE IF NOT EXISTS execution (
 );
 CREATE INDEX IF NOT EXISTS ix_execution_suggestion ON execution(suggestion_id);
 
+CREATE TABLE IF NOT EXISTS bid_ledger (
+  id TEXT PRIMARY KEY,
+  ts TEXT NOT NULL,
+  target_id TEXT NOT NULL,
+  region TEXT,
+  action TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'auto',
+  status TEXT NOT NULL,
+  from_price REAL,
+  to_price REAL,
+  delta_pct REAL,
+  margin_at_target REAL,
+  guardrail TEXT,
+  suggestion_id TEXT,
+  execution_id TEXT,
+  run_id TEXT,
+  strategy TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_bid_ledger_region_ts
+  ON bid_ledger(region, ts DESC);
+CREATE INDEX IF NOT EXISTS ix_bid_ledger_target_ts
+  ON bid_ledger(target_id, ts DESC);
+
 CREATE TABLE IF NOT EXISTS collect_task (
   id TEXT PRIMARY KEY,
   target_id TEXT NOT NULL,
@@ -591,6 +625,16 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "agent_run", "skill_id", "TEXT")
     _ensure_column(conn, "suggestion", "executed_at", "TEXT")
     _ensure_column(conn, "suggestion", "execution_id", "TEXT")
+    # 自主竞价：地区、策略、自动/异常分流
+    _ensure_column(conn, "target", "region", "TEXT NOT NULL DEFAULT '全国'")
+    _ensure_column(conn, "target", "pricing_strategy", "TEXT NOT NULL DEFAULT 'follow'")
+    _ensure_column(conn, "target", "url", "TEXT")
+    _ensure_column(conn, "target", "price_selector", "TEXT")
+    _ensure_column(conn, "suggestion", "mode", "TEXT NOT NULL DEFAULT 'manual'")
+    _ensure_column(conn, "suggestion", "exception", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "suggestion", "exception_reason", "TEXT")
+    _ensure_column(conn, "suggestion", "decided_at", "TEXT")
+    _ensure_column(conn, "suggestion", "decision_meta", "TEXT")
     _ensure_column(conn, "model_call", "run_id", "TEXT")
     _ensure_column(conn, "model_call", "prompt_tokens", "INTEGER")
     _ensure_column(conn, "model_call", "completion_tokens", "INTEGER")

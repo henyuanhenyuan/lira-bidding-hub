@@ -67,15 +67,41 @@ def list_targets() -> list[dict[str, Any]]:
 MAX_UPLOAD = 20 * 1024 * 1024
 
 
+def _excel_rows(raw: bytes) -> list[dict[str, Any]]:
+    """读 Excel 首个工作表，首行为表头。"""
+    import io
+
+    from openpyxl import load_workbook
+
+    book = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    sheet = book.worksheets[0]
+    rows = sheet.iter_rows(values_only=True)
+    try:
+        header = [str(cell or "").strip() for cell in next(rows)]
+    except StopIteration:
+        return []
+    out: list[dict[str, Any]] = []
+    for values in rows:
+        out.append(
+            {
+                header[i]: ("" if value is None else str(value))
+                for i, value in enumerate(values)
+                if i < len(header) and header[i]
+            }
+        )
+    return out
+
+
 def _parse_file(raw: bytes, filename: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """支持 CSV 与 JSON；返回 (快照, 错误)。"""
+    """支持 CSV / Excel / JSON；返回 (快照, 错误)。"""
     import csv
     import io
     import json as _json
 
     errors: list[dict[str, Any]] = []
-    text = raw.decode("utf-8-sig", errors="replace")
-    if filename.lower().endswith(".json"):
+    lower = filename.lower()
+    if lower.endswith(".json"):
+        text = raw.decode("utf-8-sig", errors="replace")
         try:
             data = _json.loads(text)
         except ValueError as exc:
@@ -85,9 +111,18 @@ def _parse_file(raw: bytes, filename: str) -> tuple[list[dict[str, Any]], list[d
             return [], [{"line": 0, "error": "JSON 需要是快照数组"}]
         return rows, errors
 
+    if lower.endswith((".xlsx", ".xlsm")):
+        try:
+            records = _excel_rows(raw)
+        except Exception as exc:
+            return [], [{"line": 0, "error": f"Excel 解析失败：{exc}"}]
+        rows_iter = enumerate(records, start=2)
+    else:
+        text = raw.decode("utf-8-sig", errors="replace")
+        rows_iter = enumerate(csv.DictReader(io.StringIO(text)), start=2)
+
     snapshots: list[dict[str, Any]] = []
-    reader = csv.DictReader(io.StringIO(text))
-    for index, row in enumerate(reader, start=2):
+    for index, row in rows_iter:
         try:
             price = float(str(row.get("list_price") or "").strip())
         except ValueError:
@@ -100,11 +135,13 @@ def _parse_file(raw: bytes, filename: str) -> tuple[list[dict[str, Any]], list[d
         observation: dict[str, Any] = {"list_price": price}
         if row.get("title"):
             observation["title"] = row["title"].strip()
+        if row.get("region"):
+            observation["region"] = row["region"].strip()
         observation["account_tier"] = (row.get("account_tier") or "normal").strip()
         snapshots.append(
             {
                 "target_id": target,
-                "ts": (row.get("ts") or "").strip() or None,
+                "ts": (row.get("ts") or "").strip() or db.now_iso(),
                 "collector": (row.get("collector") or "file").strip(),
                 "source_tier": int(row.get("source_tier") or 3),
                 "observation": observation,

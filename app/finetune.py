@@ -41,15 +41,18 @@ def finetune_dir() -> Path:
 
 
 def stack_status() -> dict[str, Any]:
-    modules = ("torch", "transformers", "peft", "trl", "datasets")
-    found = {name: bool(importlib.util.find_spec(name)) for name in modules}
+    core = ("torch", "transformers", "peft", "trl", "datasets")
+    extra = ("accelerate", "bitsandbytes")
+    found = {name: bool(importlib.util.find_spec(name)) for name in (*core, *extra)}
+    installed = all(found[name] for name in core)
     return {
         "framework": {"trainer": "trl.SFTTrainer", "peft": "peft.LoraConfig"},
         "modules": found,
-        "installed": all(found.values()),
+        "installed": installed,
+        "qlora_ready": installed and found["bitsandbytes"] and found["accelerate"],
         "note": (
             "训练依赖未安装不影响线上推理；导出数据与配置可直接在 GPU 机器上执行。"
-            if not all(found.values())
+            if not installed
             else "训练依赖齐全，可执行生成脚本。"
         ),
     }
@@ -211,10 +214,17 @@ def _config(base_model: str, dataset_path: str, method: str, epochs: int, lr: fl
         "method": method,
         "base_model": base_model,
         "dataset": dataset_path,
+        "device": "auto",
         "framework": {
             "trainer": "trl.SFTTrainer",
             "peft": "peft.LoraConfig",
             "note": "使用标准 PEFT/TRL，不引入自研训练框架",
+        },
+        "quantization": {
+            "load_in_4bit": method == "qlora",
+            "bnb_4bit_quant_type": "nf4",
+            "bnb_4bit_compute_dtype": "bfloat16",
+            "bnb_4bit_use_double_quant": True,
         },
         "lora": {
             "r": 16,
@@ -227,38 +237,100 @@ def _config(base_model: str, dataset_path: str, method: str, epochs: int, lr: fl
             "epochs": epochs,
             "learning_rate": lr,
             "batch_size": 1,
-            "gradient_accumulation": 8,
-            "max_seq_length": 2048,
+            "gradient_accumulation": 4,
+            "max_seq_length": 512,
+            "max_steps": -1,
             "bf16": True,
-            "logging_steps": 10,
+            "gradient_checkpointing": method == "qlora",
+            "logging_steps": 5,
+            "max_gpu_memory": "7GiB",
+            "max_cpu_memory": "24GiB",
         },
         "output_dir": f"data/finetune/{method}-out",
     }
 
 
-TRAIN_SCRIPT = '''"""自动生成：PEFT + TRL LoRA/SFT 启动脚本。
+TRAIN_SCRIPT = '''"""自动生成：PEFT + TRL LoRA / QLoRA 启动脚本。
 
 用法：
-  pip install torch transformers peft trl datasets accelerate
+  pip install torch transformers peft trl datasets accelerate bitsandbytes
   python data/finetune/train_lora.py --config <config.json>
 
 本脚本不使用自研训练框架；参数改 config 即可。
 """
+import inspect
 import json
 import sys
+import time
+from pathlib import Path
 
+import torch
+import transformers
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
 
+def _dtype(name):
+    return getattr(torch, name or "bfloat16")
+
+
+def _dtype_key():
+    major = int(transformers.__version__.split(".")[0])
+    return "dtype" if major >= 5 else "torch_dtype"
+
+
+def _supported(cls, keys):
+    params = inspect.signature(cls.__init__).parameters
+    return [key for key in keys if key in params]
+
+
 def main(config_path: str) -> None:
     cfg = json.load(open(config_path, encoding="utf-8"))
+    train = cfg["train"]
+    quant = cfg.get("quantization") or {}
+    started = time.time()
+
     tokenizer = AutoTokenizer.from_pretrained(cfg["base_model"], trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        cfg["base_model"], torch_dtype="auto", device_map="auto", trust_remote_code=True
-    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    device = cfg.get("device") or "auto"
+    max_memory = None
+    if device == "cpu":
+        device_map = {"": "cpu"}
+    elif device == "cuda":
+        device_map = {"": 0}
+    else:
+        device_map = "auto"
+        if train.get("max_gpu_memory"):
+            max_memory = {
+                0: train["max_gpu_memory"],
+                "cpu": train.get("max_cpu_memory", "24GiB"),
+            }
+    kwargs = {"trust_remote_code": True, "low_cpu_mem_usage": True, "device_map": device_map}
+    if max_memory:
+        kwargs["max_memory"] = max_memory
+    if quant.get("load_in_4bit"):
+        from transformers import BitsAndBytesConfig
+
+        kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type=quant.get("bnb_4bit_quant_type", "nf4"),
+            bnb_4bit_compute_dtype=_dtype(quant.get("bnb_4bit_compute_dtype")),
+            bnb_4bit_use_double_quant=bool(quant.get("bnb_4bit_use_double_quant", True)),
+        )
+        kwargs[_dtype_key()] = _dtype(quant.get("bnb_4bit_compute_dtype"))
+    else:
+        kwargs[_dtype_key()] = "auto"
+
+    model = AutoModelForCausalLM.from_pretrained(cfg["base_model"], **kwargs)
+    if train.get("gradient_checkpointing"):
+        model.gradient_checkpointing_enable()
+        model.enable_input_require_grads()
+    model.config.use_cache = False
+
     dataset = load_dataset("json", data_files=cfg["dataset"], split="train")
 
     def render(row):
@@ -267,7 +339,7 @@ def main(config_path: str) -> None:
         )
         return {"text": text}
 
-    dataset = dataset.map(render)
+    dataset = dataset.map(render, remove_columns=dataset.column_names)
     peft = LoraConfig(
         r=cfg["lora"]["r"],
         lora_alpha=cfg["lora"]["alpha"],
@@ -276,20 +348,51 @@ def main(config_path: str) -> None:
         bias=cfg["lora"]["bias"],
         task_type="CAUSAL_LM",
     )
-    args = SFTConfig(
-        output_dir=cfg["output_dir"],
-        num_train_epochs=cfg["train"]["epochs"],
-        learning_rate=cfg["train"]["learning_rate"],
-        per_device_train_batch_size=cfg["train"]["batch_size"],
-        gradient_accumulation_steps=cfg["train"]["gradient_accumulation"],
-        max_length=cfg["train"]["max_seq_length"],
-        bf16=cfg["train"]["bf16"],
-        logging_steps=cfg["train"]["logging_steps"],
-        dataset_text_field="text",
+
+    options = {
+        "output_dir": cfg["output_dir"],
+        "num_train_epochs": train["epochs"],
+        "learning_rate": train["learning_rate"],
+        "per_device_train_batch_size": train["batch_size"],
+        "gradient_accumulation_steps": train["gradient_accumulation"],
+        "gradient_checkpointing": bool(train.get("gradient_checkpointing")),
+        "bf16": bool(train.get("bf16")),
+        "logging_steps": train.get("logging_steps", 5),
+        "report_to": "none",
+        "save_strategy": "no",
+        "dataset_text_field": "text",
+    }
+    if device == "cpu":
+        options["use_cpu"] = True
+    if train.get("max_steps", -1) and train["max_steps"] > 0:
+        options["max_steps"] = int(train["max_steps"])
+    length_keys = _supported(SFTConfig, ("max_length", "max_seq_length"))
+    if length_keys:
+        options[length_keys[0]] = train["max_seq_length"]
+    args = SFTConfig(**options)
+
+    trainer_kwargs = {"model": model, "args": args, "train_dataset": dataset, "peft_config": peft}
+    if "processing_class" in inspect.signature(SFTTrainer.__init__).parameters:
+        trainer_kwargs["processing_class"] = tokenizer
+    trainer = SFTTrainer(**trainer_kwargs)
+    result = trainer.train()
+
+    out = Path(cfg["output_dir"])
+    trainer.save_model(str(out))
+    tokenizer.save_pretrained(str(out))
+    metrics = getattr(result, "metrics", {}) or {}
+    summary = {
+        "train_loss": round(float(result.training_loss), 6),
+        "steps": int(result.global_step),
+        "epochs": round(float(metrics.get("epoch", getattr(result, "epoch", 0) or 0)), 4),
+        "runtime_s": round(time.time() - started, 1),
+        "device": str(trainer.model.device),
+        "output_dir": str(out),
+    }
+    (out / "train_metrics.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    trainer = SFTTrainer(model=model, args=args, train_dataset=dataset, peft_config=peft)
-    trainer.train()
-    trainer.save_model(cfg["output_dir"])
+    print(json.dumps(summary, ensure_ascii=False))
 
 
 if __name__ == "__main__":
@@ -321,8 +424,7 @@ def create_job(
         encoding="utf-8",
     )
     script_path = folder / "train_lora.py"
-    if not script_path.exists():
-        script_path.write_text(TRAIN_SCRIPT, encoding="utf-8")
+    script_path.write_text(TRAIN_SCRIPT, encoding="utf-8")
     samples = sum(1 for line in Path(dataset_path).read_text(encoding="utf-8").splitlines() if line.strip())
     now = db.now_iso()
     conn.execute(

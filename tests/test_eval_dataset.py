@@ -17,7 +17,7 @@ def test_golden_cases_load_and_are_unique():
 
 
 def test_golden_expected_actions_are_legal():
-    legal = {"hold", "follow", "adjust_coupon", "no_action"}
+    legal = {"hold", "follow", "adjust_coupon", "no_action", "adjust_price", "join_promo"}
     for case in datasets.load():
         assert case.expected_action in legal, case.name
         assert case.payload.get("snapshots"), case.name

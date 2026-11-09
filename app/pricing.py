@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass, field
 
 from .contracts import Observation, PricePoint
 
@@ -114,4 +115,119 @@ def compute(
         price_high=round(point * (1 + spread), 2),
         confidence=round(confidence, 3),
         missing_fields=missing,
+    )
+
+
+# ---------------- 调价策略（确定性，模型只解释） ----------------
+
+STRATEGIES = ("follow", "undercut", "match_band", "hold")
+
+
+@dataclass
+class PricePlan:
+    """一次自主调价的确定性方案。"""
+
+    action: str
+    strategy: str
+    from_price: float | None
+    target_price: float | None
+    floor_price: float | None
+    delta_pct: float
+    needs_review: bool
+    reasons: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "action": self.action,
+            "strategy": self.strategy,
+            "from_price": self.from_price,
+            "target_price": self.target_price,
+            "floor_price": self.floor_price,
+            "delta_pct": round(self.delta_pct, 4),
+            "needs_review": self.needs_review,
+            "reasons": list(self.reasons),
+        }
+
+
+def floor_price(cost: float | None, margin_floor: float | None) -> float | None:
+    """守住毛利率下限的最低可售价。"""
+    if cost is None or margin_floor is None or margin_floor >= 1:
+        return None
+    return round(cost / (1 - margin_floor), 2)
+
+
+def propose(
+    point: PricePoint,
+    my_price: float | None,
+    cost: float | None,
+    margin_floor: float | None,
+    *,
+    strategy: str = "follow",
+    undercut_pct: float = 0.02,
+    min_delta_pct: float = 0.005,
+    max_delta_pct: float = 0.15,
+) -> PricePlan:
+    """根据竞品到手价给出目标价；只做确定性计算，越界显式标记复核。
+
+    策略：
+      follow      跟到竞品到手价
+      undercut    在竞品到手价基础上下调 undercut_pct
+      match_band  取竞品价格区间中值
+      hold        维持我方价
+    """
+    if strategy not in STRATEGIES:
+        strategy = "follow"
+
+    if strategy == "hold":
+        return PricePlan(
+            action="hold", strategy=strategy, from_price=my_price,
+            target_price=None, floor_price=floor_price(cost, margin_floor),
+            delta_pct=0.0, needs_review=False, reasons=["策略为维持现价"],
+        )
+
+    if strategy == "undercut":
+        raw = point.point * (1 - undercut_pct)
+    elif strategy == "match_band":
+        raw = (point.price_low + point.price_high) / 2
+    else:
+        raw = point.point
+
+    reasons: list[str] = []
+    needs_review = False
+    lowest = floor_price(cost, margin_floor)
+    target = raw
+    if lowest is not None and target < lowest:
+        target = lowest
+        needs_review = True
+        reasons.append(
+            f"竞品到手价 {raw:.2f} 低于成本底线 {lowest:.2f}，按底线出价"
+        )
+
+    target = round(max(0.01, target), 2)
+    if my_price is None:
+        return PricePlan(
+            action="adjust_price", strategy=strategy, from_price=None,
+            target_price=target, floor_price=lowest, delta_pct=0.0,
+            needs_review=True,
+            reasons=["缺少我方价，只给出目标价，需人工确认"],
+        )
+    delta = (target - my_price) / my_price
+
+    if abs(delta) > max_delta_pct:
+        needs_review = True
+        reasons.append(
+            f"单次调价幅度 {delta:+.1%} 超过 {max_delta_pct:.0%} 阈值"
+        )
+
+    if abs(delta) < min_delta_pct:
+        return PricePlan(
+            action="hold", strategy=strategy, from_price=my_price,
+            target_price=None, floor_price=lowest, delta_pct=delta,
+            needs_review=False, reasons=["价差在死区内，不调价"],
+        )
+
+    return PricePlan(
+        action="adjust_price", strategy=strategy, from_price=my_price,
+        target_price=target, floor_price=lowest, delta_pct=delta,
+        needs_review=needs_review, reasons=reasons,
     )

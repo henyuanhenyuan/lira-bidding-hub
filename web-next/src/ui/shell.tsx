@@ -1,61 +1,62 @@
 import { useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
-import { api } from "../core/api";
 import { useAuth } from "../core/auth";
-import { ROLE_TEXT } from "./kit";
+import { useLive } from "../core/live";
+import { Boundary } from "./Boundary";
+import { Icon } from "./icons";
 
 const NAV = [
-  { to: "/", label: "智能竞价分析", glyph: "◐" },
-  { to: "/agent", label: "Agent 模型", glyph: "◇" },
-  { to: "/settings", label: "设置", glyph: "⚙" },
+  { to: "/", label: "调度中枢", icon: "control", end: true },
+  { to: "/bidding", label: "竞价台", icon: "bidding" },
+  { to: "/agents", label: "智能体", icon: "agents" },
+  { to: "/sources", label: "数据接入", icon: "sources" },
+  { to: "/evaluation", label: "评测", icon: "eval" },
+  { to: "/settings", label: "设置", icon: "settings" },
 ];
 
 const TITLES: Record<string, { title: string; sub: string }> = {
-  "/": { title: "智能竞价分析", sub: "Intelligent Bidding Analysis" },
-  "/agent": { title: "Agent 模型", sub: "Multi-Agent Orchestration" },
-  "/settings": { title: "设置", sub: "Model Routing & Governance" },
+  "/": { title: "调度中枢", sub: "Agent 自主竞价 · 人工只看异常" },
+  "/bidding": { title: "竞价台", sub: "目标池 · 自主调价 · 人工确认" },
+  "/agents": { title: "智能体集群", sub: "多智能体编排 · MCP 工具 · 全链路追踪" },
+  "/sources": { title: "数据接入", sub: "影刃 / 八爪鱼 · 自有爬虫 · 文件导入" },
+  "/evaluation": { title: "评测与质量", sub: "评测集 · Bad Case · LLM-as-Judge" },
+  "/settings": { title: "控制设置", sub: "模型通道 · 竞价策略 · 微调" },
 };
 
 export default function Shell() {
   const { me, logout } = useAuth();
-  const loc = useLocation();
-  const meta = TITLES[loc.pathname] ?? TITLES["/"];
-  const [online, setOnline] = useState(false);
-  const [pending, setPending] = useState(0);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { connected } = useLive(1);
+  const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    let alive = true;
-    void api.get<{ llm_available?: boolean }>("/api/health")
-      .then((h) => alive && setOnline(Boolean(h.llm_available)))
-      .catch(() => undefined);
-    const loadPending = () => {
-      if (document.hidden) return;
-      void api.get<unknown[]>("/api/approvals/inbox")
-        .then((rows) => alive && setPending(rows.length))
-        .catch(() => undefined);
-    };
-    loadPending();
-    const timer = window.setInterval(loadPending, 60_000);
-    document.addEventListener("visibilitychange", loadPending);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", loadPending);
-    };
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
-  const name = me?.display_name || me?.username || "local";
-  const role = me?.role_text || ROLE_TEXT[me?.role ?? ""] || "成员";
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, [location.pathname]);
+
+  const meta = TITLES[location.pathname] || TITLES["/"];
 
   return (
-    <div className="app">
-      <aside className="rail">
+    <div className="shell">
+      <div className="aurora" aria-hidden="true">
+        <span className="a1" />
+        <span className="a2" />
+        <span className="a3" />
+      </div>
+      <div className="grain" aria-hidden="true" />
+
+      <aside className="rail glass">
         <div className="brand">
-          <div className="brand-mark" />
-          <div className="stack" style={{ lineHeight: 1.15 }}>
-            <span className="brand-name">Lira</span>
-            <span className="brand-sub">Bidding Agent</span>
+          <span className="brand-orb" />
+          <div>
+            <strong>Lira</strong>
+            <span>竞价智能中枢</span>
           </div>
         </div>
 
@@ -64,51 +65,66 @@ export default function Shell() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === "/"}
+              end={item.end}
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
             >
-              <span className="glyph">{item.glyph}</span>
+              <span className="nav-icon">
+                <Icon name={item.icon} size={19} />
+              </span>
               <span>{item.label}</span>
-              {item.to === "/" && pending > 0 && (
-                <span className="badge rose" style={{ marginLeft: "auto", fontSize: 9.5 }}>{pending}</span>
-              )}
             </NavLink>
           ))}
         </nav>
 
-        <div style={{ flex: 1 }} />
-
-        <div className="stack gap-10">
-          <div className="divider" />
-          <div className="user-chip">
-            <div className="avatar">{name.slice(0, 1)}</div>
-            <div className="stack" style={{ lineHeight: 1.2 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600 }}>{name}</span>
-              <span className="muted" style={{ fontSize: 10.5 }}>{role}</span>
+        <div className="rail-foot">
+          <button className="rail-action" onClick={() => navigate("/screen")}>
+            <Icon name="screen" size={17} />
+            进入大屏
+          </button>
+          <div className="identity">
+            <span className="avatar">{(me?.display_name || "L").slice(0, 1)}</span>
+            <div className="identity-text">
+              <strong>{me?.display_name || "本地模式"}</strong>
+              <span>{me?.role_text || "管理员"}</span>
             </div>
+            <button className="icon-btn" title="退出登录" onClick={() => void logout()}>
+              <Icon name="logout" size={16} />
+            </button>
           </div>
-          <button className="btn ghost sm" onClick={() => void logout()}>退出登录</button>
         </div>
       </aside>
 
-      <main className="main">
+      <div className="main">
         <header className="topbar">
-          <div className="topbar-left">
-            <span className="eyebrow">{meta.sub}</span>
-            <h1 className="h1">{meta.title}</h1>
+          <div className="page-head">
+            <h1>{meta.title}</h1>
+            <p>{meta.sub}</p>
           </div>
-          <div className="topbar-actions">
-            <span className={`badge ${online ? "mint" : ""}`}>
-              <i className="dot" /> {online ? "模型在线" : "规则兜底"}
-            </span>
-            <span className="badge cyan">PostgreSQL · pgvector</span>
-            <NavLink to="/screen" className="btn sm primary" style={{ textDecoration: "none" }}>
-              切换可视化大屏
-            </NavLink>
+          <div className="topbar-right">
+            <div className={`live-pill ${connected ? "on" : "off"}`}>
+              <span className="live-dot" />
+              {connected ? "实时链路" : "重连中"}
+            </div>
+            <div className="clock-chip num">
+              <Icon name="clock" size={15} />
+              {now.toLocaleTimeString("zh-CN", { hour12: false })}
+            </div>
+            <div className="model-chip" title="当前推理通道">
+              <Icon name="cpu" size={15} />
+              <div>
+                <strong>Qwen-Plus</strong>
+                <span>竞价微调版</span>
+              </div>
+            </div>
           </div>
         </header>
-        <Outlet />
-      </main>
+
+        <main className="content">
+          <Boundary>
+            <Outlet />
+          </Boundary>
+        </main>
+      </div>
     </div>
   );
 }

@@ -14,7 +14,7 @@ from .contracts import PricePoint
 
 log = logging.getLogger(__name__)
 
-ACTIONS = ("follow", "hold", "adjust_coupon", "join_promo", "no_action")
+ACTIONS = ("follow", "hold", "adjust_coupon", "join_promo", "no_action", "adjust_price")
 
 ACTION_TEXT = {
     "follow": "考虑跟进调价（需运营确认毛利护栏）",
@@ -22,12 +22,13 @@ ACTION_TEXT = {
     "adjust_coupon": "可考虑投放店铺券而非直接降价",
     "join_promo": "可考虑报名同类活动对冲",
     "no_action": "数据不足以支撑动作，保持现状",
+    "adjust_price": "按策略自主调价（毛利护栏内自动执行）",
 }
 
 PROMPT = """你是电商定价分析助手。只根据给定事实写解释，不得编造。
 严格输出一个 JSON 对象，不要输出任何其他文字。
 字段：
-- action: 必须从 [hold, adjust_coupon, join_promo, no_action] 中选一个
+- action: 必须从 [hold, adjust_coupon, join_promo, no_action, adjust_price] 中选一个
 - confidence: 0 到 1 的小数
 - evidence_ids: 从 allowed_evidence_ids 中逐字复制，至少 1 条
 - narrative: 不超过 60 字的中文说明
@@ -60,7 +61,7 @@ OUTPUT_SCHEMA = {
     "properties": {
         "action": {
             "type": "string",
-            "enum": ["hold", "adjust_coupon", "join_promo", "no_action"],
+            "enum": ["hold", "adjust_coupon", "join_promo", "no_action", "adjust_price"],
         },
         "confidence": {"type": "number"},
         "evidence_ids": {
@@ -84,14 +85,15 @@ class Analysis:
 
 
 def _decide_action(event_type: str, severity: str, gate: str) -> str:
+    """确定性动作策略：模型只写解释，动作与目标价都由这里决定。"""
     if gate == "observe":
         return "no_action"
     if event_type == "price_drop":
-        return "adjust_coupon" if severity == "L3" else "hold"
+        return "adjust_price" if severity == "L3" else "hold"
     if event_type == "price_rise":
         return "hold"
     if event_type == "band_breach":
-        return "follow"
+        return "adjust_price"
     return "no_action"
 
 

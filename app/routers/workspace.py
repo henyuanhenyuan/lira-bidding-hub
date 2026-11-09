@@ -36,16 +36,21 @@ def _remember(question: str, result: dict[str, Any]) -> None:
 
 
 @router.get("/api/dashboard")
-def dashboard(days: int = 7) -> dict[str, Any]:
+def dashboard(days: int = 7, region: str | None = None) -> dict[str, Any]:
     """工作区与大屏共用的聚合数据：竞价对比、事件趋势、处置状态。"""
     days = max(1, min(30, days))
+    region = (region or "").strip() or None
     with db.get_db() as conn:
         targets = [
             dict(row) for row in conn.execute(
-                "SELECT id, title, platform, my_price, my_sku, active"
-                " FROM target WHERE active = 1 ORDER BY title"
+                "SELECT id, title, platform, my_price, my_sku, region,"
+                " pricing_strategy, active FROM target WHERE active = 1"
+                + (" AND region = ?" if region else "")
+                + " ORDER BY title",
+                ((region,) if region else ()),
             ).fetchall()
         ]
+        ids = {row["id"] for row in targets}
         points = conn.execute(
             "SELECT target_id, ts, price_low, price_high FROM ("
             "  SELECT target_id, ts, price_low, price_high,"
@@ -59,9 +64,36 @@ def dashboard(days: int = 7) -> dict[str, Any]:
                 " WHERE suppressed = 0 ORDER BY ts DESC LIMIT 500"
             ).fetchall()
         ]
+        events = [event for event in events if event["target_id"] in ids]
         status_rows = conn.execute(
-            "SELECT status, COUNT(*) AS n FROM suggestion GROUP BY status"
+            "SELECT s.status, COUNT(*) AS n FROM suggestion s"
+            " JOIN event e ON e.id = s.event_id"
+            " JOIN target t ON t.id = e.target_id"
+            + (" WHERE t.region = ?" if region else "")
+            + " GROUP BY s.status",
+            ((region,) if region else ()),
         ).fetchall()
+        ledger_rows = conn.execute(
+            "SELECT * FROM bid_ledger"
+            + (" WHERE region = ?" if region else "")
+            + " ORDER BY created_at DESC LIMIT 20",
+            ((region,) if region else ()),
+        ).fetchall()
+        regions = [
+            dict(row) for row in conn.execute(
+                "SELECT region, COUNT(*) AS targets FROM target WHERE active = 1"
+                " GROUP BY region ORDER BY region"
+            ).fetchall()
+        ]
+        auto_counts = conn.execute(
+            "SELECT"
+            " SUM(CASE WHEN s.mode='auto' AND s.status='executed' THEN 1 ELSE 0 END) AS auto_executed,"
+            " SUM(CASE WHEN s.exception=1 AND s.status IN ('pending','submitted') THEN 1 ELSE 0 END) AS exceptions"
+            " FROM suggestion s JOIN event e ON e.id = s.event_id"
+            " JOIN target t ON t.id = e.target_id"
+            + (" WHERE t.region = ?" if region else ""),
+            ((region,) if region else ()),
+        ).fetchone()
 
     by_target: dict[str, list[dict[str, Any]]] = {}
     for point in points:
@@ -111,6 +143,13 @@ def dashboard(days: int = 7) -> dict[str, Any]:
         "trend": [{"date": day, "count": trend[day]} for day in ordered_days],
         "severity": severity,
         "status": {row["status"]: row["n"] for row in status_rows},
+        "region": region,
+        "regions": regions,
+        "autopilot": {
+            "auto_executed": int(auto_counts["auto_executed"] or 0),
+            "exceptions": int(auto_counts["exceptions"] or 0),
+            "ledger": [dict(row) for row in ledger_rows],
+        },
         "generated_at": db.now_iso(),
     }
 

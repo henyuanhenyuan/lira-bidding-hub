@@ -32,6 +32,10 @@ class TargetPatch(BaseModel):
     my_price: float | None = None
     title: str | None = None
     holdout: bool | None = None
+    region: str | None = None
+    pricing_strategy: str | None = None
+    url: str | None = None
+    price_selector: str | None = None
 
 @router.get("/api/targets/{target_id}")
 def get_target(target_id: str) -> dict[str, Any]:

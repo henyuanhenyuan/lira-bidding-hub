@@ -1,139 +1,136 @@
-import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { api, ApiError } from "../core/api";
 import { useAuth } from "../core/auth";
+import { Icon } from "../ui/icons";
 
-const FEATS = [
-  { g: "◈", t: "多智能体实时研判", d: "Steward / Analyst / Risk / Writer 分工跑完采集、归因、护栏与建议" },
-  { g: "◇", t: "结论可溯源", d: "每条建议绑定事件、价格与知识库证据，动作由确定性策略给出" },
-  { g: "⌁", t: "评测与微调闭环", d: "金标、判官、门禁与 LoRA/SFT 数据链路都可量化" },
+const ACCOUNTS = [
+  { username: "admin", password: "Lira@Admin2026", name: "林澈", role: "负责人" },
+  { username: "manager", password: "Lira@Manager2026", name: "周遥", role: "竞价主管" },
+  { username: "analyst", password: "Lira@Analyst2026", name: "陈粟", role: "价格分析师" },
+  { username: "operator", password: "Lira@Ops2026", name: "许棠", role: "运营执行" },
+  { username: "viewer", password: "Lira@View2026", name: "顾言", role: "只读观察" },
 ];
 
 export default function Login() {
-  const { me, refresh } = useAuth();
+  const { login, me } = useAuth();
   const navigate = useNavigate();
-  const [username, setUsername] = useState("");
+  const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("");
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (me) return <Navigate to="/" replace />;
+  useEffect(() => {
+    if (me) navigate("/", { replace: true });
+  }, [me, navigate]);
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function submit(name = username, secret = password) {
     setBusy(true);
     setError(null);
     try {
-      await api.post("/api/login", { username: username.trim(), password });
-      await refresh();
+      await login(name, secret);
       navigate("/", { replace: true });
     } catch (err) {
-      setError(
-        err instanceof ApiError && err.status === 401
-          ? "账号或密码不正确"
-          : err instanceof Error
-            ? err.message
-            : "登录失败",
-      );
+      setError(err instanceof Error ? err.message : "登录失败，请重试");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="login-shell">
-      <div className="login-visual">
+    <div className="login">
+      <div className="aurora" aria-hidden="true">
+        <span className="a1" />
+        <span className="a2" />
+        <span className="a3" />
+      </div>
+      <div className="grain" aria-hidden="true" />
+
+      <div className="login-art">
         <div className="brand">
-          <div className="brand-mark" />
-          <div className="stack" style={{ lineHeight: 1.15 }}>
-            <span className="brand-name">Lira</span>
-            <span className="brand-sub">Bidding Agent Console</span>
+          <span className="brand-orb" />
+          <div>
+            <strong>Lira</strong>
+            <span>竞价智能中枢</span>
           </div>
         </div>
-
-        <div className="login-copy fade-in">
-          <h1 className="login-title">
-            把竞品货架
-            <br />
-            <em>装进会分析的小卖铺</em>
-          </h1>
-          <p className="soft" style={{ marginTop: 16, fontSize: 15, maxWidth: 470 }}>
-            不是问答工具。多智能体嵌入竞价视图，读取真实价格与事件，
-            直接给出归因、置信度、毛利护栏与可执行动作。
-          </p>
-
-          <div className="login-feats">
-            {FEATS.map((feat) => (
-              <div className="feat" key={feat.t}>
-                <div className="fi">{feat.g}</div>
-                <div className="stack">
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{feat.t}</span>
-                  <span className="muted" style={{ fontSize: 12.5 }}>{feat.d}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="row gap-10 muted wrap" style={{ fontSize: 11.5 }}>
-          <span className="badge mint"><i className="dot" /> FastAPI</span>
-          <span className="badge violet"><i className="dot" /> LangGraph</span>
-          <span className="badge cyan"><i className="dot" /> pgvector</span>
-          <span className="badge amber"><i className="dot" /> MCP</span>
+        <h1>
+          让 Agent 自主跑竞价,
+          <br />
+          <em>人只看异常。</em>
+        </h1>
+        <p>
+          多智能体编排自动完成采集、研判、调价与复盘；风控护栏实时校验毛利与幅度，仅把需要判断的异常推到人工台。
+        </p>
+        <div className="login-points">
+          <span>自主调价</span>
+          <span>多智能体协同</span>
+          <span>MCP 工具链</span>
+          <span>全链路追踪</span>
+          <span>区域流水</span>
         </div>
       </div>
 
-      <div className="login-card-wrap">
-        <div className="orb" aria-hidden="true" />
-        <div className="orb small" aria-hidden="true" />
-        <div className="glass tilt login-card pad-lg fade-in" style={{ position: "relative", zIndex: 2 }}>
-          <div className="stack gap-4">
-            <span className="eyebrow">Sign in</span>
-            <h2 className="h2">进入竞价控制台</h2>
-            <p className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
-              使用管理员分配的账号登录
-            </p>
-          </div>
+      <div className="glass login-card">
+        <h2>进入控制台</h2>
+        <p className="sub">五人小租户 · B 端部署</p>
 
-          <form className="stack gap-12 mt-24" onSubmit={submit}>
-            <div className="field">
-              <label>账号</label>
-              <input
-                className="input"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                placeholder="admin"
-                autoComplete="username"
-              />
-            </div>
-            <div className="field">
-              <label>密码</label>
-              <input
-                className="input"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="••••••••"
-                autoComplete="current-password"
-              />
-            </div>
+        <form
+          className="login-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <label className="field">
+            <span className="field-label">账号</span>
+            <input
+              className="input"
+              value={username}
+              autoComplete="username"
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="请输入账号"
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">密码</span>
+            <input
+              className="input"
+              type="password"
+              value={password}
+              autoComplete="current-password"
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="请输入密码"
+            />
+          </label>
+          {error && <div className="login-error">{error}</div>}
+          <button className="btn primary lg" type="submit" disabled={busy}>
+            {busy ? "正在验证…" : "登入中枢"}
+            {!busy && <Icon name="arrow" size={16} />}
+          </button>
+        </form>
 
-            {error && (
-              <div className="badge rose" style={{ whiteSpace: "normal", padding: "9px 12px" }}>
-                {error}
-              </div>
-            )}
-
-            <button className="btn primary mt-4" type="submit" disabled={busy || !username.trim()}>
-              {busy ? "验证中…" : "进入控制台"}
-            </button>
-          </form>
-
-          <div className="divider mt-24" />
-          <div className="row between mt-12 muted" style={{ fontSize: 11.5 }}>
-            <span>核心通道 qwen-plus · 本机 4B 仅测试</span>
-            <span className="mono">v2.0</span>
+        <div className="accounts">
+          <span className="eyebrow">租户成员 · 点击直接进入</span>
+          <div className="accounts-grid">
+            {ACCOUNTS.map((account) => (
+              <button
+                type="button"
+                key={account.username}
+                className="account-chip"
+                onClick={() => {
+                  setUsername(account.username);
+                  setPassword(account.password);
+                  void submit(account.username, account.password);
+                }}
+              >
+                <span className="avatar">{account.name.slice(0, 1)}</span>
+                <span>
+                  <strong>{account.name}</strong>
+                  <span>{account.role}</span>
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       </div>

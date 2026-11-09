@@ -25,9 +25,14 @@ def task_collect_dispatch() -> dict:
     from . import collector
 
     out: dict = {"recovered": collector.recover_stale()}
-    for channel in ("api", "manual"):
+    for channel in ("api", "manual", "yingren", "native"):
         try:
             out[channel] = collector.dispatch_due(channel)
         except Exception as exc:
             out[channel] = {"error": str(exc)}
     return out
+
+
+@shared_task(name="lira.job.autopilot")
+def task_autopilot() -> dict:
+    return {"ran": scheduler.run_autopilot()}

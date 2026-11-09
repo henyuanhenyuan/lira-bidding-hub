@@ -66,6 +66,13 @@ def dispatch_due(
         task_id = task["id"]
         account = task.get("account") or DEFAULT_ACCOUNT
         shop = task.get("shop") or DEFAULT_SHOP
+        with db.get_db() as conn:
+            target = conn.execute(
+                "SELECT url, price_selector FROM target WHERE id = ?",
+                (task["target_id"],),
+            ).fetchone()
+        if target:
+            task = {**task, "url": target["url"], "price_selector": target["price_selector"]}
 
         if not risk.allow(channel, account, shop, client=risk_client, now=at):
             with db.get_db() as conn:

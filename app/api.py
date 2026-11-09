@@ -21,6 +21,8 @@ from .routers import settings as settings_router
 from .routers import workspace
 from .routers import integration
 from .routers import finetune
+from .routers import autopilot
+from .routers import crawl
 
 router = APIRouter()
 for sub in (
@@ -41,5 +43,7 @@ for sub in (
     settings_router.router,
     integration.router,
     finetune.router,
+    autopilot.router,
+    crawl.router,
 ):
     router.include_router(sub)

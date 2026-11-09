@@ -58,7 +58,7 @@ def _guardrail_allows(sugg, actor_role: str, note: str | None) -> None:
         raise TransitionError("未设置成本价，需管理员确认后才能推进")
 
 
-HIGH_RISK_ACTIONS = ("adjust_coupon", "follow", "join_promo")
+HIGH_RISK_ACTIONS = ("adjust_coupon", "follow", "join_promo", "adjust_price")
 
 
 def _strict_hitl() -> bool:

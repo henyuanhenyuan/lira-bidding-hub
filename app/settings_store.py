@@ -33,6 +33,16 @@ DEFAULTS: dict[str, Any] = {
     "taobao_app_secret": "",
     "octoparse_token": "",
     "octoparse_base_url": "https://dataapi.octoparse.com",
+    "yingren_base_url": "",
+    "yingren_token": "",
+    "native_crawler_url": "",
+    "native_crawler_token": "",
+    # 自主竞价
+    "autopilot_enabled": True,
+    "autopilot_strategy": "follow",
+    "autopilot_undercut_pct": 0.02,
+    "autopilot_max_delta_pct": 0.15,
+    "autopilot_min_confidence": 0.80,
 }
 
 
@@ -159,5 +169,20 @@ def public_view() -> dict[str, Any]:
                 "base_url": data["octoparse_base_url"],
                 "has_token": bool(data["octoparse_token"]),
             },
+            "yingren": {
+                "base_url": data["yingren_base_url"],
+                "has_token": bool(data["yingren_token"]),
+            },
+            "native": {
+                "base_url": data["native_crawler_url"],
+                "has_token": bool(data["native_crawler_token"]),
+            },
+        },
+        "autopilot": {
+            "enabled": bool(data["autopilot_enabled"]),
+            "strategy": data["autopilot_strategy"],
+            "undercut_pct": data["autopilot_undercut_pct"],
+            "max_delta_pct": data["autopilot_max_delta_pct"],
+            "min_confidence": data["autopilot_min_confidence"],
         },
     }

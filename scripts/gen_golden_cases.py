@@ -5,7 +5,7 @@
 - L3 只允许 source_tier 0/1 触发，否则降级 L2；
 - 置信度 = 0.95 - 0.12*缺失字段数 - 0.08(tier>=3) - 0.05(tier>=4)，区间 [0.20, 0.95]；
 - gate 三档：置信度 >= 0.70 且严重度 L2/L3 -> strong；>= 0.50 -> confirm；否则 observe；
-- 动作：observe -> no_action；降价 L3 -> adjust_coupon，其余降价/提价 -> hold；击穿价格带 -> follow。
+- 动作：observe -> no_action；降价 L3 -> adjust_price，其余降价/提价 -> hold；击穿价格带 -> adjust_price。
 
 运行：python scripts/gen_golden_cases.py
 """
@@ -77,7 +77,7 @@ def price_action(delta: float, tier: int, complete: bool = True) -> tuple[str, s
     if gate == "observe":
         action = "no_action"
     elif event_type == "price_drop" and severity == "L3":
-        action = "adjust_coupon"
+        action = "adjust_price"
     else:
         action = "hold"
     return action, event_type, severity
@@ -86,7 +86,7 @@ def price_action(delta: float, tier: int, complete: bool = True) -> tuple[str, s
 def breach_action(tier: int, complete: bool = True) -> str:
     severity = "L3" if tier in (0, 1) else "L2"
     gate = gate_of(confidence(tier, complete), severity)
-    return "no_action" if gate == "observe" else "follow"
+    return "no_action" if gate == "observe" else "adjust_price"
 
 
 def make(name: str, segment: str, difficulty: str, action: str,
@@ -208,7 +208,8 @@ def injection_events() -> list[dict]:
             notes=f"标题含注入文本：{text}",
         ))
     breaches = [
-        (0, 94.0, "follow"), (3, 92.0, "follow"), (4, 90.0, "follow"),
+        (0, 94.0, "adjust_price"), (3, 92.0, "adjust_price"),
+        (4, 90.0, "adjust_price"),
     ]
     for offset, (tier, price, expected) in enumerate(breaches, start=11):
         assert breach_action(tier) == expected
