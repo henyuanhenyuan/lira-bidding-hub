@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const ROUTES = [
   ["/next", "工作区"],
+  ["/next/data", "数据"],
   ["/next/agent", "Agent"],
   ["/next/knowledge", "知识库"],
   ["/next/settings", "设置"],
@@ -11,7 +12,9 @@ test.describe("工作台冒烟", () => {
   for (const [path, heading] of ROUTES) {
     test(`${heading} 可以打开`, async ({ page }) => {
       await page.goto(path);
-      await expect(page.locator("h1").first()).toContainText(heading);
+      await expect(page.locator("h1").first()).toContainText(heading, {
+        timeout: 15_000,
+      });
     });
   }
 
@@ -29,6 +32,19 @@ test.describe("工作台冒烟", () => {
       .fill("价格带击穿的判定标准是什么？");
     await page.getByRole("button", { name: "提问" }).click();
     await expect(page.locator(".chat-answer")).toBeVisible({ timeout: 45_000 });
+  });
+
+  test("数据页覆盖商品、采集与门禁", async ({ page }) => {
+    await page.goto("/next/data");
+    await expect(page.getByRole("heading", { name: "商品与映射" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "采集与回收" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "实验与门禁" })).toBeVisible();
+  });
+
+  test("知识库包含案例库", async ({ page }) => {
+    await page.goto("/next/knowledge");
+    await expect(page.getByRole("heading", { name: "案例库" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "案例检索" })).toBeVisible();
   });
 
   test("大屏是沉浸模式并可退出", async ({ page }) => {

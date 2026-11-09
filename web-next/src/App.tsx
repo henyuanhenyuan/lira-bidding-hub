@@ -1,16 +1,17 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 
 import { api } from "./core/api";
 import { useAuth } from "./core/auth";
 import { Shell } from "./ui/kit";
 
-import AgentHub from "./pages/AgentHub";
-import BigScreen from "./pages/BigScreen";
-import Knowledge from "./pages/Knowledge";
-import Login from "./pages/Login";
-import Settings from "./pages/Settings";
-import Workspace from "./pages/Workspace";
+const Workspace = lazy(() => import("./pages/Workspace"));
+const Data = lazy(() => import("./pages/Data"));
+const AgentHub = lazy(() => import("./pages/AgentHub"));
+const BigScreen = lazy(() => import("./pages/BigScreen"));
+const Knowledge = lazy(() => import("./pages/Knowledge"));
+const Login = lazy(() => import("./pages/Login"));
+const Settings = lazy(() => import("./pages/Settings"));
 
 function Boot() {
   return <div className="loader">正在载入…</div>;
@@ -27,16 +28,23 @@ function Layout() {
   const [pending, setPending] = useState(0);
   useEffect(() => {
     let alive = true;
-    const load = () =>
-      api
+    const load = () => {
+      if (document.hidden) return;
+      void api
         .get<unknown[]>("/api/approvals/inbox")
         .then((rows) => alive && setPending(rows.length))
         .catch(() => undefined);
-    void load();
+    };
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    load();
     const timer = window.setInterval(load, 30_000);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       alive = false;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, []);
   return (
@@ -48,18 +56,21 @@ function Layout() {
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route element={<RequireAuth />}>
-        <Route path="screen" element={<BigScreen />} />
-        <Route element={<Layout />}>
-          <Route index element={<Workspace />} />
-          <Route path="agent" element={<AgentHub />} />
-          <Route path="knowledge" element={<Knowledge />} />
-          <Route path="settings" element={<Settings />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+    <Suspense fallback={<Boot />}>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route element={<RequireAuth />}>
+          <Route path="screen" element={<BigScreen />} />
+          <Route element={<Layout />}>
+            <Route index element={<Workspace />} />
+            <Route path="data" element={<Data />} />
+            <Route path="agent" element={<AgentHub />} />
+            <Route path="knowledge" element={<Knowledge />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }

@@ -47,8 +47,11 @@ def dashboard(days: int = 7) -> dict[str, Any]:
             ).fetchall()
         ]
         points = conn.execute(
-            "SELECT target_id, ts, price_low, price_high FROM price_point"
-            " ORDER BY ts DESC"
+            "SELECT target_id, ts, price_low, price_high FROM ("
+            "  SELECT target_id, ts, price_low, price_high,"
+            "         row_number() OVER (PARTITION BY target_id ORDER BY ts DESC) AS rn"
+            "  FROM price_point"
+            ") ranked WHERE rn <= 2 ORDER BY ts DESC"
         ).fetchall()
         events = [
             dict(row) for row in conn.execute(

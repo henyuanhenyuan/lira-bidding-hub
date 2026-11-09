@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import auth, config, db, scheduler, settings_store
 from .api import router
@@ -24,6 +25,19 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Lira 电商 · 竞品情报 Agent", version="0.3.0", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+
+class ImmutableStaticFiles(StaticFiles):
+    """Vite 产物带内容哈希，可以长期强缓存。"""
+
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        if response.status_code in (200, 304):
+            response.headers.setdefault(
+                "Cache-Control", "public, max-age=31536000, immutable"
+            )
+        return response
 
 # 默认拒绝：鉴权开启时，除登录/健康检查/静态资源外一律先验身份。
 PUBLIC_PATHS = {
@@ -44,13 +58,12 @@ async def auth_guard(request: Request, call_next):
     return await call_next(request)
 
 
-db.init_db()
 app.include_router(router)
 
 if (config.NEXT_DIR / "assets").exists():
     app.mount(
         "/next/assets",
-        StaticFiles(directory=config.NEXT_DIR / "assets"),
+        ImmutableStaticFiles(directory=config.NEXT_DIR / "assets"),
         name="next-assets",
     )
 
@@ -89,7 +102,7 @@ def next_app(path: str = "") -> Response:
     """React 工作台。静态资源由 /next/assets 提供，其余路径回落到 SPA。"""
     index = config.NEXT_DIR / "index.html"
     if index.exists():
-        return FileResponse(index)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
     return HTMLResponse(
         "<h2>前端尚未构建</h2><p>cd web-next && npm install && npm run build</p>",
         status_code=503,

@@ -13,6 +13,8 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 
 打开 http://127.0.0.1:8011/next 。默认本地模式无需登录；开启鉴权后从 `/next/login` 进入。
 
+端口：应用 **8011**，PostgreSQL **5432**，Vite 开发服务器 **5173**；Redis 只在 compose 网络内，不映射宿主。
+
 前端构建（若 `web-next/dist` 不存在）：
 
 ```bash
@@ -97,6 +99,14 @@ python scripts/calibrate_judge.py          # 判官校准（需 LIRA_JUDGE_MODEL
 - 判官未通过校准（kappa < 0.70）时只作参考，不参与门禁。
 - 评测会写入数据库，门禁建议用独立库：
   `LIRA_DATABASE_URL=postgresql://lira:lira@127.0.0.1:5432/lira_eval python scripts/eval_gate.py --tier smoke`。
+
+## 运维脚本
+
+| 脚本 | 用途 |
+| --- | --- |
+| `scripts/reindex_vectors.py` | 换 embedding 模型后重建 PGVector 索引 |
+| `scripts/backup.py` | 在线备份（pg_dump，失败时逻辑导出） |
+| `scripts/install-service.ps1` | 用 NSSM 把服务注册为 Windows 服务 |
 
 ## 主要接口
 

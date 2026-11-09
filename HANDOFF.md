@@ -1,6 +1,6 @@
 # Lira 电商 · 交接说明
 
-> 更新于 2026-11-09。面向下一位接手的人（或未来的我）。
+> 更新于 2026-11-09。封关状态：代码、数据层、镜像与端口已收敛，见下方"封关清单"。
 
 ## 一句话
 
@@ -10,13 +10,13 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 最新提交 | `be354cb docs: 增加交接说明`（本次重构未提交） |
-| 工作树 | 有未提交改动：PGVector + PostgreSQL 单后端 |
-| 端口 | 应用 **8011**；PostgreSQL **5432**；Redis **6379** |
+| 最新提交 | 本轮封关提交（`git log -1`）；上一提交 `391b439 refactor!: PGVector` |
+| 工作树 | 干净 |
+| 端口 | 应用 **8011**；PostgreSQL **5432**；Vite 开发 **5173**；Redis 只在 compose 网络内 |
 | 数据层 | PostgreSQL 16 + pgvector（唯一后端，已移除 SQLite/Qdrant） |
-| 后端测试 | 367 项，全绿（PostgreSQL） |
+| 后端测试 | 367 项，全绿 |
 | 评测门禁 | `eval_gate --tier smoke` 通过；动作/证据/轨迹/检索 均 1.0 |
-| e2e | Playwright 10 项通过 |
+| e2e | Playwright 13 项通过 |
 | 模型 | 默认本地 `qwen3:4b`（Ollama）；可在设置页切到云端 `qwen-plus` |
 | GitHub | 私有仓库已建：https://github.com/henyuanhenyuan/lira- ，**尚未推送** |
 
@@ -44,12 +44,13 @@ ollama pull qwen3:4b
 
 模型不可用时自动走确定性模板，功能不受影响；`LIRA_LLM=off` 强制关闭。
 
-## 界面结构（只有 4 个一级入口）
+## 界面结构（5 个一级入口）
 
-- **工作区**：商品货架（竞价对比）+ AI 市场解读 + 事件与处置 + AI 研判 + 问 Agent；右上角「沉浸大屏」
+- **工作区**：商品货架（竞价对比）+ AI 市场解读 + 事件与处置 + AI 研判（时间线、批准/拒绝/执行/回滚）+ 问 Agent；右上角「沉浸大屏」
+- **数据**：我方商品、竞品映射、采集任务、待回收结果、人工复核、实验与门禁
 - **大屏**：`/screen`，不在侧栏，自动贩卖机陈列 + 指标 + 评测 + 执行脉冲 + 跑马灯，10s 自动刷新
 - **Agent**：研判流水线、工具货架、Skill 货架、流式试跑
-- **知识库**：知识货架 + 检索命中 + 新增文档
+- **知识库**：知识货架 + 检索命中 + 新增文档 + 案例库/案例检索
 - **设置**：模型来源（本地/云端）、数据接入（淘宝 / 影刃八爪鱼 / 文件）、账号、运行环境
 
 设计语言：玩具风商品封面、贴纸、价签，货架统一装进玻璃货柜；我方价高亮。
@@ -57,22 +58,41 @@ ollama pull qwen3:4b
 ## 能力清单
 
 - 多 Agent：Steward / Analyst / Risk / Writer + 结构化 handoff（≤2 次）+ 有界 ReAct（步数/时长/无进展三重上限）
-- RAG：PostgreSQL + pgvector + 父子块 + 向量/关键词 RRF + 重排 + 查询改写 + 二跳
+- RAG：PostgreSQL + pgvector（每集合一张 `vec_*` 表、HNSW 余弦索引）+ 父子块 + 向量/关键词 RRF + 重排 + 查询改写 + 二跳
 - 上下文：`app/context.py` 分层裁剪（L0 指令 / L1 事实 / L2 记忆 / L3 规则），不可信内容统一标记
 - 安全：注入隔离 + 污染时只读工具、PII 脱敏、审批风险分级、MCP 令牌
-- 评测：120 条金标（价格 40 / 护栏 30 / 注入 15 / 低置信 20 / SOP 15）+ 检索金标 + floor/delta 门禁 + 判官校准（kappa 1.0）
+- 评测：120 条金标（价格 40 / 护栏 30 / 注入 15 / 低置信 20 / SOP 15）+ 15 条检索 + 24 条判官校准 + floor/delta 门禁
 - 观测：span 追踪、token/成本、P50/P95/P99
 - 数据接入：CSV/JSON 文件、推送接口 `/v1/ingest/snapshots`、淘宝与八爪鱼配置位
+- 交付：GZip + 静态资源一年强缓存；前端按路由拆包；后台标签页暂停轮询
+
+## 本轮封关改了什么
+
+1. **存储收敛**：Qdrant → PostgreSQL + pgvector；删除 SQLite、迁移脚本与 `numpy` 依赖。
+2. **性能**：后端加 GZip 与静态强缓存、补 `price_point/event` 索引、Dashboard 改窗口函数；前端路由拆包、时钟组件隔离（不再每秒重渲染整屏）、表格自适应、`prefers-reduced-motion` 全局生效。
+3. **功能对齐**：新增"数据"页（商品/映射/采集/回收/复核/门禁）；知识库补案例库与案例检索；工作区补审批时间线、拒绝/执行/回滚。
+4. **闲置清理**：删除 3 个过期应用镜像（约 1.9GB）、旧 Redis 容器、2 个匿名卷、SQLite/Qdrant 遗留数据；CSS 去掉约 100 行死样式；运维脚本全部写进 README。
+
+## 封关清单
+
+- 依赖：12 个，全部有运行时用途（`uvicorn` 为启动命令，`python-multipart` 为 FastAPI 表单上传必需）
+- 镜像：仅 `pgvector/pgvector:pg16`、`redis:7-alpine`
+- 容器：仅 `ms-db-1`
+- 卷：仅 `ms_pgdata`
+- 本地数据：仅 `secret.key`、`backups/`、`eval/`、`inbox/`
+- 端口：8011 / 5432 / 5173（开发）；6379 已释放
 
 ## 待办（按优先级）
 
-1. **P0 推送 GitHub**：仓库已建，缺一次授权。两种方式：
+1. **P0 推送 GitHub**：仓库已建，缺一次授权。
    - 提供带 `repo`（或该仓库 Contents 写）权限的 PAT，用一次性 header 推送；
    - 或在已授权的机器上 `git push -u origin main`。
-   远程已配置：`origin https://github.com/henyuanhenyuan/lira-.git`（GitHub 把「电商」转成了 `-`；要纯英文名可改 `lira-ecommerce`）。
-2. **P1 判官校准换难例**：现有 24 条都是对错分明样本，kappa=1.0 不代表难题稳定。建议用真实 badcase 重跑 `scripts/calibrate_judge.py`。
-3. **P2 报告结论 #2（可选）**：vLLM/SGLang 推理部署、LoRA/SFT/DPO 微调——当前刻意未做，面向 30K+ 岗位时再补。
-4. 同类项目差距（可选）：多租户、RAGAS 适配、分层上下文数据库。
+   远程：`origin https://github.com/henyuanhenyuan/lira-.git`（GitHub 把「电商」转成了 `-`）。
+2. **P1 真实数据链路**：当前演示数据以导入/推送为主，淘宝与八爪鱼仍是配置位。面试前至少打通一条真实或半真实的采集路径。
+3. **P2 评测难度**：金标偏 easy，判官 24 条对错分明（kappa=1.0 是天花板效应）。用真实 badcase 扩充并重跑 `scripts/calibrate_judge.py`。
+4. **P3 剩余 API-only 功能**：目标价格历史/holdout 开关、评测坏例与报告详情、采集日志汇总、文档详情、建议风险与执行预览。
+5. **P4 多智能体消融**：去掉多 Agent 后指标掉多少，补一组对照数据。
+6. **P5 结论 #2（可选）**：vLLM/SGLang 推理部署、LoRA/SFT/DPO 微调——面向 30K+ 岗位时再补。
 
 ## 已知限制
 
@@ -81,39 +101,45 @@ ollama pull qwen3:4b
 - 大屏“运行评测”走 `retrieval=false` 的快路径（避免 bge-m3 让评测变慢）；完整检索评测走命令行。
 - 4B 模型偶尔输出“思考过程”，已对解读/问答加 JSON 约束与无效回退（规则兜底）。
 - 云端模型需要在设置页填 Base URL 与 Key，密钥只写入 `data/settings.json`（`data/` 已 gitignore）。
+- 向量表按集合分表，换 embedding 模型后需重跑 `scripts/reindex_vectors.py`。
 
 ## 关键文件
 
 ```
 app/agent.py              归因、证据校验、确定性动作策略
 app/agent_graph.py        LangGraph 状态机、有界 ReAct、handoff、记忆注入
+app/vectorstore.py        PostgreSQL + pgvector 存储（HNSW、JSONB 过滤）
 app/context.py            分层上下文构建
 app/retrieval_service.py  查询改写 + 二跳 + 加权 RRF + trace
 app/llm/                  多 Provider 网关（路由/退避/熔断/限流/账本）
 app/evaluation/           金标、指标、判官、运行器、门禁
 app/safety/               注入隔离、PII 脱敏
 app/routers/              15 个领域路由
-app/settings_store.py     运行时设置（模型与数据接入）
-web-next/src/ui/viz.tsx   货架、货柜、贩卖机、流水线、星图等可视化组件
+app/main.py               GZip、静态缓存、SPA 回落
+web-next/src/pages/Data.tsx  商品、映射、采集、回收、门禁
+web-next/src/ui/viz.tsx   货架、货柜、贩卖机、流水线等可视化组件
 scripts/eval_gate.py      评测门禁
 scripts/calibrate_judge.py 判官校准
+scripts/reindex_vectors.py 换模型后重建向量
 ```
 
 ## 常用命令
 
 ```bash
-pytest -q
+docker compose up -d db
 pytest -q
 python scripts/eval_gate.py --tier smoke
 python scripts/gen_golden_cases.py
 python scripts/calibrate_judge.py
-cd web-next && npx playwright test
+python scripts/reindex_vectors.py
+cd web-next && npm run build && npx playwright test
 ```
 
-## 今天这轮改了什么（提交记录）
+## 提交记录
 
-- `f5daba6` 货架式前端、数据接入与实时 AI 解读
-- `d629660` 删除被取代的旧路线文档
+- 本轮封关：性能优化、功能对齐、闲置清理（见 `git log -1`）
+- `391b439` 向量库改用 PGVector 并移除 SQLite
+- `be354cb` 增加交接说明
 - `30b5657` 项目统一命名为 Lira 电商
-
-更早两个大提交：`321770a`（前端重写、后端瘦身、端口 8011）、`bebb10e`（评测体系、模型网关、安全与可观测）。
+- `f5daba6` 货架式前端、数据接入与实时 AI 解读
+- 更早：`321770a`（前端重写、端口 8011）、`bebb10e`（评测体系、模型网关、安全与可观测）

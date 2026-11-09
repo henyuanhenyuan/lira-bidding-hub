@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import numpy as np
+import math
 
 from . import db, embeddings
 
@@ -10,11 +10,9 @@ MAX_CANDIDATES = 3
 
 
 def _cos(a: list[float], b: list[float]) -> float:
-    va, vb = np.array(a, dtype=np.float32), np.array(b, dtype=np.float32)
-    denom = float(np.linalg.norm(va) * np.linalg.norm(vb))
-    if denom == 0:
-        return 0.0
-    return float(va @ vb / denom)
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return 0.0 if norm == 0 else dot / norm
 
 
 def _price_closeness(my_price: float | None, target_price: float | None) -> float:

@@ -505,6 +505,14 @@ def _init_postgres() -> None:
         for statement in _pg_schema():
             conn.execute(statement)
         _ensure_all_columns(conn)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_price_point_target_ts"
+            " ON price_point(target_id, ts DESC)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS ix_event_open_ts"
+            " ON event(ts DESC) WHERE suppressed = 0"
+        )
     with get_db() as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     try:

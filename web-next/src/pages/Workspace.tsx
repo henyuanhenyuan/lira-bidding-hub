@@ -6,7 +6,7 @@ import { money, pct, ts } from "../core/format";
 import { useAsync } from "../core/hooks";
 import type { EventRow, Suggestion } from "../core/types";
 import { Cabinet, ProductShelf } from "../ui/viz";
-import { Badge, Empty, ErrorBox, Page, SeverityBadge, Spinner, StatusBadge, actionText } from "../ui/kit";
+import { Badge, Empty, ErrorBox, Page, SeverityBadge, Spinner, Stat, StatusBadge, actionText } from "../ui/kit";
 
 interface CompareRow {
   id: string;
@@ -35,6 +35,22 @@ interface ChatReply {
   mode: string;
 }
 
+interface TimelineRow {
+  id: string;
+  action: string;
+  actor: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  note?: string | null;
+  at: string;
+}
+
+interface ExecutionRow {
+  id: string;
+  status?: string;
+  to_price?: number | null;
+}
+
 export default function Workspace() {
   const { data, error, loading, reload } = useAsync(async () => {
     const [dash, events, suggestions, insights] = await Promise.all([
@@ -54,6 +70,9 @@ export default function Workspace() {
   const [chatInput, setChatInput] = useState("");
   const [chatReply, setChatReply] = useState<ChatReply | null>(null);
   const [chatBusy, setChatBusy] = useState(false);
+  const [timeline, setTimeline] = useState<TimelineRow[]>([]);
+  const [executions, setExecutions] = useState<ExecutionRow[]>([]);
+  const [detailTick, setDetailTick] = useState(0);
 
   const events = data?.events ?? [];
   const suggestions = data?.suggestions ?? [];
@@ -81,6 +100,38 @@ export default function Workspace() {
     void analyze(selected.id, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto, selected?.id, selectedSuggestion?.id]);
+
+  useEffect(() => {
+    const sid = selectedSuggestion?.id;
+    if (!sid) {
+      setTimeline([]);
+      setExecutions([]);
+      return;
+    }
+    let alive = true;
+    void Promise.all([
+      api.get<TimelineRow[]>(`/api/suggestions/${sid}/timeline`).catch(() => []),
+      api.get<ExecutionRow[]>(`/api/suggestions/${sid}/executions`).catch(() => []),
+    ]).then(([rows, runs]) => {
+      if (!alive) return;
+      setTimeline(rows);
+      setExecutions(runs);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [selectedSuggestion?.id, detailTick]);
+
+  async function suggestionAction(fn: () => Promise<unknown>, done: string) {
+    try {
+      await fn();
+      await reload();
+      setDetailTick((value) => value + 1);
+      setNotice(done);
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "操作失败");
+    }
+  }
 
   async function analyze(eventId: string, silent = false) {
     setBusyId(eventId);
@@ -139,28 +190,10 @@ export default function Workspace() {
       {notice && <div className="notice">{notice}</div>}
 
       <div className="stat-grid">
-        <div className="stat">
-          <div className="stat-label">击穿价格带</div>
-          <div className="stat-value" style={{ color: breaches ? "#fb7185" : undefined }}>
-            {breaches}
-          </div>
-          <div className="stat-hint">竞品低于我方 95%</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">待审批</div>
-          <div className="stat-value">{pending}</div>
-          <div className="stat-hint">等待人工确认</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">L3 事件</div>
-          <div className="stat-value">{l3}</div>
-          <div className="stat-hint">高优先级</div>
-        </div>
-        <div className="stat">
-          <div className="stat-label">在跟竞品</div>
-          <div className="stat-value">{dash.compare.length}</div>
-          <div className="stat-hint">实时价格对比</div>
-        </div>
+        <Stat label="击穿价格带" value={breaches} hint="竞品低于我方 95%" tone={breaches ? "danger" : undefined} />
+        <Stat label="待审批" value={pending} hint="等待人工确认" />
+        <Stat label="L3 事件" value={l3} hint="高优先级" />
+        <Stat label="在跟竞品" value={dash.compare.length} hint="实时价格对比" />
       </div>
 
       <div className="workspace-grid">
@@ -310,37 +343,84 @@ export default function Workspace() {
                   <dt>护栏</dt>
                   <dd>{selectedSuggestion.guardrail}</dd>
                 </dl>
-                <div className="row" style={{ marginTop: 12 }}>
+                {timeline.length > 0 && (
+                  <ul className="timeline">
+                    {timeline.slice(-6).map((row) => (
+                      <li key={row.id}>
+                        <time>{ts(row.at)}</time>
+                        <b>{row.action}</b>
+                        <span>
+                          {row.note || `${row.from_status ?? "—"} → ${row.to_status ?? "—"}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <div className="row" style={{ marginTop: 12, flexWrap: "wrap" }}>
                   <button
                     className="btn sm"
                     disabled={selectedSuggestion.status !== "submitted"}
-                    onClick={async () => {
-                      try {
-                        await api.post(`/api/suggestions/${selectedSuggestion.id}/approve`, {});
-                        await reload();
-                        setNotice("已批准");
-                      } catch (err) {
-                        setNotice(err instanceof ApiError ? err.message : "审批失败");
-                      }
-                    }}
+                    onClick={() =>
+                      suggestionAction(
+                        () => api.post(`/api/suggestions/${selectedSuggestion.id}/approve`, {}),
+                        "已批准",
+                      )
+                    }
                   >
                     批准
                   </button>
                   <button
                     className="btn ghost sm"
+                    disabled={selectedSuggestion.status !== "submitted"}
+                    onClick={() =>
+                      suggestionAction(
+                        () => api.post(`/api/suggestions/${selectedSuggestion.id}/reject`, {}),
+                        "已拒绝",
+                      )
+                    }
+                  >
+                    拒绝
+                  </button>
+                  <button
+                    className="btn ghost sm"
                     disabled={selectedSuggestion.status !== "pending"}
-                    onClick={async () => {
-                      try {
-                        await api.post(`/api/suggestions/${selectedSuggestion.id}/submit`, {});
-                        await reload();
-                        setNotice("已提交审批");
-                      } catch (err) {
-                        setNotice(err instanceof ApiError ? err.message : "提交失败");
-                      }
-                    }}
+                    onClick={() =>
+                      suggestionAction(
+                        () => api.post(`/api/suggestions/${selectedSuggestion.id}/submit`, {}),
+                        "已提交审批",
+                      )
+                    }
                   >
                     提交审批
                   </button>
+                  <button
+                    className="btn ghost sm"
+                    disabled={selectedSuggestion.status !== "approved"}
+                    onClick={() =>
+                      suggestionAction(
+                        () =>
+                          api.post(`/api/suggestions/${selectedSuggestion.id}/execute`, {
+                            executed_price: selectedSuggestion.target_price ?? undefined,
+                          }),
+                        "已执行",
+                      )
+                    }
+                  >
+                    执行
+                  </button>
+                  {executions.length > 0 && (
+                    <button
+                      className="btn ghost sm"
+                      onClick={() =>
+                        suggestionAction(
+                          () => api.post(`/api/executions/${executions[0].id}/rollback`),
+                          "已回滚",
+                        )
+                      }
+                    >
+                      回滚
+                    </button>
+                  )}
                 </div>
               </>
             )}

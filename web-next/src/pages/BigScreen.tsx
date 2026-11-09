@@ -53,6 +53,15 @@ function flatten(nodes: TraceNode[], depth = 0): (TraceNode & { depth: number })
   ]);
 }
 
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <span className="screen-clock">{now.toLocaleTimeString("zh-CN")}</span>;
+}
+
 export default function BigScreen() {
   const { data, error, loading, reload } = useAsync(async () => {
     const [dash, metrics, evals, traces, runs, insights] = await Promise.all([
@@ -74,15 +83,11 @@ export default function BigScreen() {
   }, []);
 
   useEffect(() => {
-    const timer = window.setInterval(() => void reload(), 10_000);
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void reload();
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, [reload]);
-
-  const [clock, setClock] = useState(() => new Date());
-  useEffect(() => {
-    const timer = window.setInterval(() => setClock(new Date()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   const [evalBusy, setEvalBusy] = useState(false);
   const [evalMsg, setEvalMsg] = useState("");
@@ -131,7 +136,7 @@ export default function BigScreen() {
           <h1>竞品智能体 · 实时大屏</h1>
         </div>
         <div className="screen-meta">
-          <span className="screen-clock">{clock.toLocaleTimeString("zh-CN")}</span>
+          <Clock />
           <span className="screen-dot" />
           <Link className="btn ghost sm" to="/">
             返回工作区

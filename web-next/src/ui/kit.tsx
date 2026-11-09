@@ -185,7 +185,10 @@ export function Shell({
   const groups: { group: string; items: { to: string; label: string }[] }[] = [
     {
       group: "主线",
-      items: [{ to: "/", label: "工作区" }],
+      items: [
+        { to: "/", label: "工作区" },
+        { to: "/data", label: "数据" },
+      ],
     },
     {
       group: "能力",

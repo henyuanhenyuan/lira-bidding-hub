@@ -21,14 +21,29 @@ interface Hit {
   score: number;
 }
 
+interface CaseItem {
+  id: string;
+  category: string;
+  event_type: string;
+  price_band: string;
+  summary: string;
+  attribution: string;
+  decision?: string | null;
+  outcome_7d?: string | null;
+  ts: string;
+}
+
 export default function Knowledge() {
   const { data, error, loading, reload } = useAsync(() => api.get<DocItem[]>("/api/docs"), []);
+  const casesQ = useAsync(() => api.get<CaseItem[]>("/api/cases?limit=40"), []);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
+  const [caseQuery, setCaseQuery] = useState("");
+  const [caseHits, setCaseHits] = useState<CaseItem[] | null>(null);
 
   async function search() {
     if (!query.trim()) return;
@@ -60,6 +75,34 @@ export default function Knowledge() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "写入失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function seedCases() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await api.post<{ added: number; total: number }>("/api/cases/seed");
+      setMessage(`新增 ${result.added} 条案例，共 ${result.total} 条`);
+      await casesQ.reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "写入失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function searchCases() {
+    if (!caseQuery.trim()) return;
+    setBusy(true);
+    try {
+      setCaseHits(
+        await api.get<CaseItem[]>(`/api/cases/search${qs({ q: caseQuery, limit: 5 })}`),
+      );
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "案例检索失败");
     } finally {
       setBusy(false);
     }
@@ -165,6 +208,73 @@ export default function Knowledge() {
                 </tr>
               ))}
             </Table>
+          )}
+        </Card>
+      </div>
+
+      <div className="split">
+        <Card
+          title="案例库"
+          sub={`${casesQ.data?.length ?? 0} 条处置沉淀`}
+          extra={
+            <button className="btn ghost sm" disabled={busy} onClick={() => void seedCases()}>
+              示例案例
+            </button>
+          }
+        >
+          {!casesQ.data || casesQ.data.length === 0 ? (
+            <Empty>还没有案例，生成示例或记录一次回收结果。</Empty>
+          ) : (
+            <Table head={["类型", "价格带", "摘要", "决策"]}>
+              {casesQ.data.slice(0, 10).map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <Badge tone="neutral">{item.event_type}</Badge>
+                    <div className="sub">{item.category}</div>
+                  </td>
+                  <td className="mono">{item.price_band}</td>
+                  <td>{item.summary}</td>
+                  <td>{item.decision ?? "—"}</td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+
+        <Card title="案例检索" sub="按场景找相似处置">
+          <div className="row" style={{ marginBottom: 10 }}>
+            <input
+              className="input"
+              style={{ flex: 1 }}
+              placeholder="例如：竞品大促前降价"
+              value={caseQuery}
+              onChange={(event) => setCaseQuery(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && void searchCases()}
+            />
+            <button className="btn" disabled={busy} onClick={() => void searchCases()}>
+              检索
+            </button>
+          </div>
+          {caseHits === null ? (
+            <Empty>输入场景描述，找历史处置。</Empty>
+          ) : caseHits.length === 0 ? (
+            <Empty>没有相似案例。</Empty>
+          ) : (
+            <div className="hit-list">
+              {caseHits.map((item, index) => (
+                <div className={`hit rank-${index}`} key={item.id}>
+                  <div className="hit-head">
+                    <span className="hit-rank">{index + 1}</span>
+                    <b>{item.summary}</b>
+                    <Badge tone="accent">{item.price_band}</Badge>
+                  </div>
+                  <p>
+                    {item.attribution}
+                    {item.outcome_7d ? ` · ${item.outcome_7d}` : ""}
+                  </p>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       </div>
