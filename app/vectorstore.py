@@ -1,27 +1,19 @@
 from __future__ import annotations
 
-import atexit
+import hashlib
+import json
 import logging
-import os
-import uuid
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
-from qdrant_client import QdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PointIdsList,
-    PointStruct,
-    VectorParams,
-)
+from . import db
 
 log = logging.getLogger(__name__)
 
-_NAMESPACE = uuid.UUID("6f1c2a5e-9f3b-5a7d-8c1e-2b4d6f8a0c3e")
-_client: QdrantClient | None = None
+_DIMS: dict[str, int] = {}
+_SAFE = re.compile(r"[^a-z0-9_]")
+_DIM_RE = re.compile(r"vector\((\d+)\)")
 
 
 @dataclass(frozen=True)
@@ -38,87 +30,89 @@ class Hit:
     payload: dict[str, Any]
 
 
-def default_client() -> QdrantClient:
-    """URL 优先（服务端）；否则本地目录模式，Windows 单进程可用。"""
-    global _client
-    if _client is None:
-        url = os.getenv("LIRA_QDRANT_URL", "")
-        if url:
-            _client = QdrantClient(url=url)
-        else:
-            from . import config
-
-            path = config.DATA_DIR / "qdrant"
-            path.mkdir(parents=True, exist_ok=True)
-            _client = QdrantClient(path=str(path))
-    return _client
+def table_name(collection: str) -> str:
+    safe = _SAFE.sub("_", (collection or "").lower()).strip("_")
+    if not safe:
+        raise ValueError("collection 不能为空")
+    if len(safe) > 48:
+        digest = hashlib.md5(collection.encode("utf-8")).hexdigest()[:8]
+        safe = f"{safe[:39]}_{digest}"
+    return f"vec_{safe}"
 
 
-def _close_client() -> None:
-    global _client
-    if _client is not None:
-        try:
-            _client.close()
-        except Exception:
-            pass
-        _client = None
+def _literal(vector: list[float]) -> str:
+    return "[" + ",".join(f"{float(value):.7g}" for value in vector) + "]"
 
 
-atexit.register(_close_client)
+def _exists(conn, table: str) -> bool:
+    row = conn.execute("SELECT to_regclass(?) AS reg", (table,)).fetchone()
+    return bool(row and row["reg"])
 
 
-def _point_uuid(collection: str, point_id: str) -> str:
-    return str(uuid.uuid5(_NAMESPACE, f"{collection}:{point_id}"))
+def _column_dim(conn, table: str) -> int | None:
+    row = conn.execute(
+        "SELECT format_type(a.atttypid, a.atttypmod) AS t"
+        " FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid"
+        " WHERE c.relname = ? AND a.attname = 'embedding' AND NOT a.attisdropped",
+        (table,),
+    ).fetchone()
+    if not row:
+        return None
+    match = _DIM_RE.search(row["t"] or "")
+    return int(match.group(1)) if match else None
 
 
-class QdrantVectorStore:
-    def __init__(self, client: QdrantClient | None = None) -> None:
-        self.client = client or default_client()
-        self._dims: dict[str, int] = {}
+class PgVectorStore:
+    """PostgreSQL + pgvector 向量存储：每集合一张表，HNSW 余弦索引。"""
 
-    def ensure(self, collection: str, dim: int) -> None:
-        known = self._dims.get(collection)
+    def ensure(self, collection: str, dim: int) -> str:
+        table = table_name(collection)
+        known = _DIMS.get(collection)
         if known is not None:
             if known != dim:
-                raise ValueError(
-                    f"collection {collection} 维度是 {known}，收到 {dim}"
+                raise ValueError(f"collection {collection} 维度是 {known}，收到 {dim}")
+            return table
+        with db.get_db() as conn:
+            if _exists(conn, table):
+                size = _column_dim(conn, table)
+                if size is not None and size != dim:
+                    raise ValueError(
+                        f"collection {collection} 维度是 {size}，收到 {dim}"
+                    )
+            else:
+                conn.execute(
+                    f'CREATE TABLE IF NOT EXISTS "{table}" ('
+                    " id TEXT PRIMARY KEY,"
+                    f" embedding vector({int(dim)}) NOT NULL,"
+                    " payload JSONB NOT NULL DEFAULT '{}'::jsonb)"
                 )
-            return
-        if self.client.collection_exists(collection):
-            info = self.client.get_collection(collection)
-            params = info.config.params.vectors
-            size = getattr(params, "size", None)
-            if size is not None and size != dim:
-                raise ValueError(
-                    f"collection {collection} 维度是 {size}，收到 {dim}"
+                index = f"{table}_hnsw"[:63]
+                conn.execute(
+                    f'CREATE INDEX IF NOT EXISTS "{index}" ON "{table}"'
+                    " USING hnsw (embedding vector_cosine_ops)"
                 )
-            self._dims[collection] = dim
-            return
-        self.client.create_collection(
-            collection,
-            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
-        )
-        self._dims[collection] = dim
+        _DIMS[collection] = int(dim)
+        return table
 
     def upsert(self, collection: str, points: Iterable[Point]) -> None:
         batch = list(points)
         if not batch:
             return
         dim = len(batch[0].vector)
-        if any(len(p.vector) != dim for p in batch):
+        if any(len(point.vector) != dim for point in batch):
             raise ValueError("同一批次的向量维度必须一致")
-        self.ensure(collection, dim)
-        self.client.upsert(
-            collection,
-            points=[
-                PointStruct(
-                    id=_point_uuid(collection, p.id),
-                    vector=p.vector,
-                    payload={**p.payload, "ref": p.id},
-                )
-                for p in batch
-            ],
-        )
+        table = self.ensure(collection, dim)
+        rows = [
+            (point.id, _literal(point.vector), json.dumps(point.payload, ensure_ascii=False))
+            for point in batch
+        ]
+        with db.get_db() as conn:
+            conn.executemany(
+                f'INSERT INTO "{table}" (id, embedding, payload) VALUES (?,?::vector,?::jsonb)'
+                " ON CONFLICT (id) DO UPDATE SET"
+                " embedding = EXCLUDED.embedding, payload = EXCLUDED.payload",
+                rows,
+            )
 
     def search(
         self,
@@ -128,53 +122,54 @@ class QdrantVectorStore:
         top_k: int = 20,
         filters: dict[str, Any] | None = None,
     ) -> list[Hit]:
-        if not self.client.collection_exists(collection):
-            return []
-        query_filter = None
-        if filters:
-            query_filter = Filter(
-                must=[
-                    FieldCondition(key=key, match=MatchValue(value=value))
-                    for key, value in filters.items()
-                ]
-            )
-        response = self.client.query_points(
-            collection,
-            query=vector,
-            limit=max(1, top_k),
-            query_filter=query_filter,
-            with_payload=True,
-        )
-        hits: list[Hit] = []
-        for point in response.points:
-            payload = dict(point.payload or {})
-            hits.append(
-                Hit(
-                    id=payload.get("ref", str(point.id)),
-                    score=float(point.score),
-                    payload=payload,
+        table = table_name(collection)
+        query = _literal(vector)
+        with db.get_db() as conn:
+            if not _exists(conn, table):
+                return []
+            if filters:
+                sql = (
+                    f'SELECT id, payload, 1 - (embedding <=> ?::vector) AS score'
+                    f' FROM "{table}" WHERE payload @> ?::jsonb'
+                    " ORDER BY embedding <=> ?::vector LIMIT ?"
                 )
-            )
-        return hits
-
-    def delete(self, collection: str, ids: Iterable[str]) -> None:
-        if not self.client.collection_exists(collection):
-            return
-        self.client.delete(
-            collection,
-            points_selector=PointIdsList(
-                points=[_point_uuid(collection, i) for i in ids]
-            ),
-        )
-
-    def collections(self, prefix: str = "") -> list[str]:
+                rows = conn.execute(
+                    sql,
+                    (query, json.dumps(filters, ensure_ascii=False), query, max(1, top_k)),
+                ).fetchall()
+            else:
+                sql = (
+                    f'SELECT id, payload, 1 - (embedding <=> ?::vector) AS score'
+                    f' FROM "{table}" ORDER BY embedding <=> ?::vector LIMIT ?'
+                )
+                rows = conn.execute(sql, (query, query, max(1, top_k))).fetchall()
         return [
-            item.name
-            for item in self.client.get_collections().collections
-            if item.name.startswith(prefix)
+            Hit(id=row["id"], score=float(row["score"]), payload=dict(row["payload"] or {}))
+            for row in rows
         ]
 
+    def delete(self, collection: str, ids: Iterable[str]) -> None:
+        table = table_name(collection)
+        keys = list(ids)
+        if not keys:
+            return
+        with db.get_db() as conn:
+            if _exists(conn, table):
+                conn.execute(f'DELETE FROM "{table}" WHERE id = ANY(?)', (keys,))
+
+    def collections(self, prefix: str = "") -> list[str]:
+        with db.get_db() as conn:
+            rows = conn.execute(
+                "SELECT table_name FROM information_schema.tables"
+                " WHERE table_schema = 'public' AND table_name LIKE 'vec\\_%'"
+            ).fetchall()
+        names = [row["table_name"][4:] for row in rows]
+        return sorted(name for name in names if name.startswith(prefix))
+
     def count(self, collection: str) -> int:
-        if not self.client.collection_exists(collection):
-            return 0
-        return int(self.client.count(collection).count)
+        table = table_name(collection)
+        with db.get_db() as conn:
+            if not _exists(conn, table):
+                return 0
+            row = conn.execute(f'SELECT COUNT(*) AS c FROM "{table}"').fetchone()
+        return int(row["c"] if row else 0)

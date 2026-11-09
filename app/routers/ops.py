@@ -75,7 +75,7 @@ def ops_state(
         m = metrics.summary(conn, 24)
         collection = collectors.health(conn)
         freshness = collectors.freshness(conn)
-    pattern = "lira-*.sql" if db.BACKEND == "postgres" else "lira-*.db"
+    pattern = "lira-*.sql"
     backups = sorted(
         (p.name for p in (config.DATA_DIR / "backups").glob(pattern)), reverse=True
     )[:5] if (config.DATA_DIR / "backups").exists() else []
@@ -131,7 +131,7 @@ def health() -> dict[str, Any]:
         ).fetchall()
         freshness = collectors.freshness(conn)
 
-    store = vectorstore.QdrantVectorStore()
+    store = vectorstore.PgVectorStore()
     indexed = sum(
         store.count(name) for name in store.collections("case_embeddings_")
     )

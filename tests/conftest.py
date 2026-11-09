@@ -7,7 +7,6 @@ os.environ["LIRA_SCHEDULER"] = "off"
 os.environ["LIRA_CELERY_EAGER"] = "1"
 os.environ["LIRA_AUTH"] = "off"
 
-TEST_BACKEND = os.getenv("LIRA_TEST_DB", "sqlite")
 
 
 def _ensure_database(url: str) -> None:
@@ -33,12 +32,11 @@ def _ensure_database(url: str) -> None:
         raise RuntimeError(f"PostgreSQL 不可用（{parts.netloc}）：{exc}") from exc
 
 
-if TEST_BACKEND == "postgres":
-    os.environ["LIRA_DATABASE_URL"] = os.getenv(
-        "LIRA_TEST_DATABASE_URL",
-        "postgresql://lira:lira@127.0.0.1:5432/lira_test",
-    )
-    _ensure_database(os.environ["LIRA_DATABASE_URL"])
+os.environ["LIRA_DATABASE_URL"] = os.getenv(
+    "LIRA_TEST_DATABASE_URL",
+    "postgresql://lira:lira@127.0.0.1:5432/lira_test",
+)
+_ensure_database(os.environ["LIRA_DATABASE_URL"])
 
 import pytest  # noqa: E402
 
@@ -71,16 +69,11 @@ TABLES = [
     "doc",
     "skill",
     "eval_case",
-    "case_fts",
     "case",
     "collect_task",
     "collect_log",
     "manual_review",
 ]
-
-if TEST_BACKEND == "postgres":
-    TABLES = [t for t in TABLES if t != "case_fts"]
-
 
 CONFIG_KEYS = (
     "LLM_BACKEND", "LLM_ROUTE", "OLLAMA_MODEL", "OLLAMA_URL",
@@ -105,12 +98,14 @@ def _schema():
 
 @pytest.fixture(autouse=True)
 def clean_db(_schema):
-    if db.BACKEND == "postgres":
-        joined = ", ".join(f'"{t}"' for t in TABLES)
-        with db.get_db() as conn:
-            conn.execute(f"TRUNCATE TABLE {joined} RESTART IDENTITY CASCADE")
-    else:
-        with db.get_db() as conn:
-            for t in TABLES:
-                conn.execute(f'DELETE FROM "{t}"')
+    joined = ", ".join(f'"{t}"' for t in TABLES)
+    with db.get_db() as conn:
+        conn.execute(f"TRUNCATE TABLE {joined} RESTART IDENTITY CASCADE")
+        rows = conn.execute(
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_schema = 'public' AND table_name LIKE 'vec\\_%'"
+        ).fetchall()
+        if rows:
+            vectors = ", ".join(f'"{row["table_name"]}"' for row in rows)
+            conn.execute(f"TRUNCATE TABLE {vectors}")
     yield

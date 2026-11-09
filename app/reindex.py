@@ -6,7 +6,7 @@ from . import cases, db, docs, embeddings, vectorstore
 
 
 def reindex(conn: Any) -> dict[str, int]:
-    """按文本重建 Qdrant 向量。旧库 BLOB 已删除，且 provider 可能不同，重新嵌入更可靠。"""
+    """按文本重建 PGVector 向量。provider 可能不同，重新嵌入更可靠。"""
     grouped: dict[str, list[vectorstore.Point]] = {}
 
     case_rows = conn.execute(
@@ -39,7 +39,7 @@ def reindex(conn: Any) -> dict[str, int]:
             )
         )
 
-    store = vectorstore.QdrantVectorStore()
+    store = vectorstore.PgVectorStore()
     for name, points in grouped.items():
         store.upsert(name, points)
     return {"cases": len(case_rows), "doc_chunks": len(chunk_rows)}

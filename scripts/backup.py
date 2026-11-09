@@ -1,4 +1,4 @@
-"""在线备份 + inbox 归档（SQLite 或 PostgreSQL）。
+"""在线备份 + inbox 归档（PostgreSQL）。
 
 用法：
     python scripts/backup.py            # 备份到 data/backups/

@@ -90,16 +90,10 @@ def create(
     }
     if delta_pct is not None:
         payload["delta_pct"] = float(delta_pct)
-    vectorstore.QdrantVectorStore().upsert(
+    vectorstore.PgVectorStore().upsert(
         collection_name(provider, len(vec)),
         [vectorstore.Point(cid, vec, payload)],
     )
-    if db.BACKEND != "postgres":
-        conn.execute("DELETE FROM case_fts WHERE id = ?", (cid,))
-        conn.execute(
-            "INSERT INTO case_fts (id, summary, attribution) VALUES (?,?,?)",
-            (cid, summary, attribution),
-        )
     return cid
 
 
@@ -145,7 +139,7 @@ def search(
     by_id = {r["id"]: r for r in rows}
 
     # 向量召回：集合按 provider + 维度隔离，结构化条件下推为 payload 过滤
-    store = vectorstore.QdrantVectorStore()
+    store = vectorstore.PgVectorStore()
     filters = {
         key: value
         for key, value in (("category", category), ("event_type", event_type))
@@ -162,22 +156,16 @@ def search(
     # 关键词召回
     keyword_rank: list[str] = []
     try:
-        if db.BACKEND == "postgres":
-            escaped = (
-                (query or "")[:60]
-                .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            )
-            needle = f"%{escaped}%"
-            fts_rows = conn.execute(
-                'SELECT id FROM "case" WHERE summary ILIKE ? ESCAPE \'\\\''
-                " OR attribution ILIKE ? ESCAPE '\\' LIMIT 20",
-                (needle, needle),
-            ).fetchall()
-        else:
-            fts_rows = conn.execute(
-                "SELECT id FROM case_fts WHERE case_fts MATCH ? LIMIT 20",
-                (_fts_query(query),),
-            ).fetchall()
+        escaped = (
+            (query or "")[:60]
+            .replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        needle = f"%{escaped}%"
+        fts_rows = conn.execute(
+            'SELECT id FROM "case" WHERE summary ILIKE ? ESCAPE \'\\\''
+            " OR attribution ILIKE ? ESCAPE '\\' LIMIT 20",
+            (needle, needle),
+        ).fetchall()
         keyword_rank = [r["id"] for r in fts_rows if r["id"] in by_id]
     except Exception:
         keyword_rank = []

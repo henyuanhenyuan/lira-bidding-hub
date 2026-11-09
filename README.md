@@ -6,6 +6,7 @@
 ## 快速开始
 
 ```bash
+docker compose up -d db          # PostgreSQL 16 + pgvector，监听 127.0.0.1:5432
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
@@ -37,7 +38,7 @@ ollama pull qwen3:4b          # 显卡够可换 qwen3:14b
 - **多 Agent**：Steward（数据门禁）/ Analyst（归因）/ Risk（毛利与护栏）/ Writer（文案），
   节点间结构化 handoff（每次运行 ≤ 2 次）；`react` 节点提供有界 ReAct（步数 / 时长 / 无进展三重上限）。
 - **不变量**：动作只由 `agent._decide_action` 决定；证据闭包不通过整条作废；人工审批是唯一执行入口。
-- **RAG**：父子块切分（LlamaIndex）+ Qdrant + 向量 / 关键词 RRF + 重排；检索侧含查询改写与二跳。
+- **RAG**：父子块切分（LlamaIndex）+ PostgreSQL/pgvector + 向量 / 关键词 RRF + 重排；检索侧含查询改写与二跳。
 - **MCP**：`python -m app.mcp_server` 暴露与站内一致的 7 个工具，支持令牌校验。
 - **评测**：120 条分层金标 + 检索金标 + floor/delta 门禁 + 判官校准。
 - **可观测**：span 追踪、token / 成本、P50 / P95 / P99。
@@ -46,7 +47,7 @@ ollama pull qwen3:4b          # 显卡够可换 qwen3:14b
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `LIRA_DATA_DIR` | `./data` | 数据目录（SQLite、Qdrant 本地存储、备份） |
+| `LIRA_DATA_DIR` | `./data` | 数据目录（上传、备份、运行时设置） |
 | `LIRA_DATABASE_URL` | 空 | 设置后使用 PostgreSQL |
 | `LIRA_LLM` | `auto` | `auto / off / on` |
 | `LIRA_LLM_BACKEND` | `legacy` | `legacy`（直连 Ollama）/ `gateway`（多 Provider 路由，推荐） |
@@ -94,8 +95,8 @@ python scripts/calibrate_judge.py          # 判官校准（需 LIRA_JUDGE_MODEL
 - 指标：动作准确率、证据闭包率、轨迹完整率、检索 Recall@k / MRR。
 - 坏例自动入库：`GET /api/eval/badcases`。
 - 判官未通过校准（kappa < 0.70）时只作参考，不参与门禁。
-- 评测与运行中的服务共用本地 Qdrant 会抢锁，门禁建议用独立数据目录：
-  `LIRA_DATA_DIR=$(mktemp -d) python scripts/eval_gate.py --tier smoke`。
+- 评测会写入数据库，门禁建议用独立库：
+  `LIRA_DATABASE_URL=postgresql://lira:lira@127.0.0.1:5432/lira_eval python scripts/eval_gate.py --tier smoke`。
 
 ## 主要接口
 
@@ -114,8 +115,7 @@ python scripts/calibrate_judge.py          # 判官校准（需 LIRA_JUDGE_MODEL
 ## 测试
 
 ```bash
-pytest -q                            # 后端
-LIRA_TEST_DB=postgres pytest         # PostgreSQL 回归
+pytest -q                            # 后端（需先 docker compose up -d db）
 cd web-next && npx playwright test   # 冒烟 e2e（本机 Edge）
 ```
 
@@ -136,5 +136,5 @@ tests/                     后端测试
 
 ## 数据库
 
-默认 SQLite（`data/lira.db`），生产 PostgreSQL（`docker compose up -d db`）。
-从 SQLite 搬迁：`python scripts/migrate_sqlite_to_pg.py --truncate`（逐表核对行数）。
+统一 PostgreSQL 16 + pgvector（`docker compose up -d db`）。
+首次启动自动创建 `vector`、`pg_trgm` 扩展与 HNSW 索引。

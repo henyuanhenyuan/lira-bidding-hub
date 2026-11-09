@@ -71,8 +71,6 @@ def record(
 def _flush_row(row: dict[str, Any]) -> None:
     try:
         with db.get_db() as conn:
-            if db.BACKEND == "sqlite":
-                conn.execute("PRAGMA busy_timeout = 300")
             conn.execute(
                 "INSERT INTO span (id, trace_id, parent_id, run_id, name, kind,"
                 " status, attributes, started_at, duration_ms, created_at)"
@@ -108,8 +106,6 @@ def span(name: str, kind: str = "span", **attributes: Any) -> Iterator[str]:
 def _update_duration(span_id: str, duration_ms: int) -> None:
     try:
         with db.get_db() as conn:
-            if db.BACKEND == "sqlite":
-                conn.execute("PRAGMA busy_timeout = 300")
             conn.execute(
                 "UPDATE span SET duration_ms = ? WHERE id = ?", (duration_ms, span_id)
             )

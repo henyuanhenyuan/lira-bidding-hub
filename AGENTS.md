@@ -20,8 +20,8 @@ cd web-next && npm install && npm run build
 ## 测试
 
 ```bash
-pytest -q                      # SQLite
-LIRA_TEST_DB=postgres pytest   # PostgreSQL 回归
+docker compose up -d db        # 测试依赖 PostgreSQL + pgvector
+pytest -q
 ```
 
 ## 评测

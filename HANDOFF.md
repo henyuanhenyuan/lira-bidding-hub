@@ -10,10 +10,11 @@
 
 | 项目 | 状态 |
 | --- | --- |
-| 最新提交 | `30b5657 chore: 项目统一命名为 Lira 电商` |
-| 工作树 | 干净 |
-| 端口 | 统一 **8011** |
-| 后端测试 | 370 项，全绿 |
+| 最新提交 | `be354cb docs: 增加交接说明`（本次重构未提交） |
+| 工作树 | 有未提交改动：PGVector + PostgreSQL 单后端 |
+| 端口 | 应用 **8011**；PostgreSQL **5432**；Redis **6379** |
+| 数据层 | PostgreSQL 16 + pgvector（唯一后端，已移除 SQLite/Qdrant） |
+| 后端测试 | 367 项，全绿（PostgreSQL） |
 | 评测门禁 | `eval_gate --tier smoke` 通过；动作/证据/轨迹/检索 均 1.0 |
 | e2e | Playwright 10 项通过 |
 | 模型 | 默认本地 `qwen3:4b`（Ollama）；可在设置页切到云端 `qwen-plus` |
@@ -22,6 +23,7 @@
 ## 怎么跑
 
 ```bash
+docker compose up -d db
 pip install -r requirements.txt
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 ```
@@ -55,7 +57,7 @@ ollama pull qwen3:4b
 ## 能力清单
 
 - 多 Agent：Steward / Analyst / Risk / Writer + 结构化 handoff（≤2 次）+ 有界 ReAct（步数/时长/无进展三重上限）
-- RAG：Qdrant + 父子块 + 向量/关键词 RRF + 重排 + 查询改写 + 二跳
+- RAG：PostgreSQL + pgvector + 父子块 + 向量/关键词 RRF + 重排 + 查询改写 + 二跳
 - 上下文：`app/context.py` 分层裁剪（L0 指令 / L1 事实 / L2 记忆 / L3 规则），不可信内容统一标记
 - 安全：注入隔离 + 污染时只读工具、PII 脱敏、审批风险分级、MCP 令牌
 - 评测：120 条金标（价格 40 / 护栏 30 / 注入 15 / 低置信 20 / SOP 15）+ 检索金标 + floor/delta 门禁 + 判官校准（kappa 1.0）
@@ -74,8 +76,8 @@ ollama pull qwen3:4b
 
 ## 已知限制
 
-- 评测与运行中的服务共用本地 Qdrant 会抢锁，门禁请用独立数据目录：
-  `LIRA_DATA_DIR=$(mktemp -d) python scripts/eval_gate.py --tier smoke`
+- 评测会写入数据库，门禁请用独立库：
+  `LIRA_DATABASE_URL=postgresql://lira:lira@127.0.0.1:5432/lira_eval python scripts/eval_gate.py --tier smoke`
 - 大屏“运行评测”走 `retrieval=false` 的快路径（避免 bge-m3 让评测变慢）；完整检索评测走命令行。
 - 4B 模型偶尔输出“思考过程”，已对解读/问答加 JSON 约束与无效回退（规则兜底）。
 - 云端模型需要在设置页填 Base URL 与 Key，密钥只写入 `data/settings.json`（`data/` 已 gitignore）。
@@ -101,7 +103,7 @@ scripts/calibrate_judge.py 判官校准
 
 ```bash
 pytest -q
-LIRA_TEST_DB=postgres pytest
+pytest -q
 python scripts/eval_gate.py --tier smoke
 python scripts/gen_golden_cases.py
 python scripts/calibrate_judge.py

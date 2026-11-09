@@ -5,8 +5,9 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("LIRA_DATA_DIR", BASE_DIR / "data"))
-DB_PATH = DATA_DIR / "lira.db"
-DATABASE_URL = os.getenv("LIRA_DATABASE_URL", "")
+DATABASE_URL = os.getenv(
+    "LIRA_DATABASE_URL", "postgresql://lira:lira@127.0.0.1:5432/lira"
+)
 NEXT_DIR = BASE_DIR / "web-next" / "dist"
 
 # 模型通道。legacy = 旧的直连 Ollama；gateway = 多 Provider 路由（推荐）。

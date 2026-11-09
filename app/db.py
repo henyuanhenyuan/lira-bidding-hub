@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import re
-import sqlite3
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
-from .config import DATABASE_URL, DB_PATH, ensure_dirs
+from .config import DATABASE_URL
 
-BACKEND = "postgres" if DATABASE_URL else "sqlite"
+BACKEND = "postgres"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS target (
@@ -411,8 +411,10 @@ def _pg_pool():
 
         _pool = ConnectionPool(
             DATABASE_URL,
-            min_size=1,
-            max_size=10,
+            min_size=int(os.getenv("LIRA_DB_POOL_MIN", "1")),
+            max_size=int(os.getenv("LIRA_DB_POOL_MAX", "10")),
+            max_idle=float(os.getenv("LIRA_DB_POOL_IDLE", "180")),
+            timeout=10.0,
             kwargs={"row_factory": dict_row},
             open=True,
         )
@@ -426,12 +428,10 @@ _DATETIME_LITERALS = (
 
 
 def to_backend_sql(sql: str, *, bind: bool = True) -> str:
-    """把 SQLite 写法收敛成当前后端可执行的 SQL。
+    """把 SQL 占位符与时间函数收敛成 PostgreSQL 可执行的写法。
 
     bind=True 时按 psycopg 的客户端绑定规则转义百分号，避免正文里的 `%` 被当成占位符。
     """
-    if BACKEND != "postgres":
-        return sql
     for pattern, repl in _DATETIME_LITERALS:
         sql = re.sub(pattern, repl, sql)
     sql = re.sub(r"datetime\(\s*'now'\s*,\s*\?\s*\)", "(now() + (?)::interval)", sql)
@@ -470,15 +470,8 @@ class _PgConnection:
 
 
 def connect():
-    if BACKEND == "postgres":
-        pool = _pg_pool()
-        return _PgConnection(pool.getconn(), pool)
-    ensure_dirs()
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    pool = _pg_pool()
+    return _PgConnection(pool.getconn(), pool)
 
 
 @contextmanager
@@ -504,22 +497,7 @@ def _pg_schema() -> list[str]:
 
 
 def init_db() -> None:
-    if BACKEND == "postgres":
-        _init_postgres()
-        return
-    with get_db() as conn:
-        conn.executescript(SCHEMA)
-        try:
-            conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS case_fts USING fts5("
-                "id UNINDEXED, summary, attribution, tokenize='trigram')"
-            )
-        except sqlite3.OperationalError:
-            conn.execute(
-                "CREATE VIRTUAL TABLE IF NOT EXISTS case_fts USING fts5("
-                "id UNINDEXED, summary, attribution)"
-            )
-        _ensure_all_columns(conn)
+    _init_postgres()
 
 
 def _init_postgres() -> None:
@@ -527,6 +505,8 @@ def _init_postgres() -> None:
         for statement in _pg_schema():
             conn.execute(statement)
         _ensure_all_columns(conn)
+    with get_db() as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
     try:
         with get_db() as conn:
             conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
@@ -560,7 +540,7 @@ def _ensure_all_columns(conn) -> None:
     _ensure_column(conn, "skill", "stages", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "skill", "output_schema", "TEXT")
     _ensure_column(conn, "collect_task", "interval_s", "INTEGER NOT NULL DEFAULT 0")
-    # 向量已迁到 Qdrant，旧库里的 embedding 列不再写入
+    # 向量已迁到 PGVector，旧库里的 embedding 列不再写入
     _drop_column(conn, "case", "embedding")
     _drop_column(conn, "doc_chunk", "embedding")
     _ensure_column(conn, "suggestion", "executed_price", "REAL")
@@ -587,24 +567,14 @@ def _ensure_all_columns(conn) -> None:
 
 
 def _ensure_column(conn, table: str, column: str, ddl: str) -> None:
-    if BACKEND == "postgres":
-        conn.execute(
-            f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS {column} '
-            f'{ddl.replace("REAL", "DOUBLE PRECISION")}'
-        )
-        return
-    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
-    if column not in cols:
-        conn.execute(f'ALTER TABLE "{table}" ADD COLUMN {column} {ddl}')
+    conn.execute(
+        f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS {column} '
+        f'{ddl.replace("REAL", "DOUBLE PRECISION")}'
+    )
 
 
 def _drop_column(conn, table: str, column: str) -> None:
-    if BACKEND == "postgres":
-        conn.execute(f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS {column}')
-        return
-    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{table}")').fetchall()]
-    if column in cols:
-        conn.execute(f'ALTER TABLE "{table}" DROP COLUMN {column}')
+    conn.execute(f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS {column}')
 
 
 def row_to_dict(row) -> dict[str, Any]:
@@ -612,23 +582,15 @@ def row_to_dict(row) -> dict[str, Any]:
 
 
 def is_unique_violation(exc: Exception) -> bool:
-    if BACKEND == "postgres":
-        try:
-            import psycopg
-        except ImportError:
-            return False
-        return isinstance(exc, psycopg.errors.UniqueViolation)
-    return isinstance(exc, sqlite3.IntegrityError)
+    import psycopg
+
+    return isinstance(exc, psycopg.errors.UniqueViolation)
 
 
 def is_db_error(exc: Exception) -> bool:
-    if BACKEND == "postgres":
-        try:
-            import psycopg
-        except ImportError:
-            return False
-        return isinstance(exc, psycopg.Error)
-    return isinstance(exc, sqlite3.Error)
+    import psycopg
+
+    return isinstance(exc, psycopg.Error)
 
 
 def loads(value: str | None, default: Any) -> Any:

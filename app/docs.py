@@ -116,7 +116,7 @@ def create_doc(
             )
         )
 
-    store = vectorstore.QdrantVectorStore()
+    store = vectorstore.PgVectorStore()
     for name, points in batches.items():
         store.upsert(name, points)
     return get_doc(conn, doc_id)
@@ -169,7 +169,7 @@ def search_docs(conn, query: str, limit: int = 3) -> list[dict[str, Any]]:
     by_id = {row["id"]: row for row in rows}
 
     qvec, provider = embeddings.embed(text)
-    hits = vectorstore.QdrantVectorStore().search(
+    hits = vectorstore.PgVectorStore().search(
         collection_name(provider, len(qvec)), qvec, top_k=20
     )
     vector_rank = [hit.id for hit in hits if hit.id in by_id]

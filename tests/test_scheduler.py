@@ -31,8 +31,7 @@ def test_backup_job_writes_file(monkeypatch):
     with db.get_db() as conn:
         pass
     from app import config
-    pattern = "lira-*.sql" if db.BACKEND == "postgres" else "lira-*.db"
-    assert list((config.DATA_DIR / "backups").glob(pattern))
+    assert list((config.DATA_DIR / "backups").glob("lira-*.sql"))
 
 
 def test_state_shape():

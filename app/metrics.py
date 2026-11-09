@@ -51,8 +51,6 @@ def record(
 ) -> None:
     try:
         conn = db.connect()
-        if db.BACKEND == "sqlite":
-            conn.execute("PRAGMA busy_timeout = 500")
         from .safety.redact import redact
 
         detail = redact(detail or "")[0]
