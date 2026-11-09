@@ -56,6 +56,8 @@ TABLES = [
     "model_call",
     "job_run",
     "app_user",
+    "api_token",
+    "finetune_job",
     "approval_log",
     "agent_step",
     "agent_run",

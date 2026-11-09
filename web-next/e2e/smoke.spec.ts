@@ -1,10 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const ROUTES = [
-  ["/next", "工作区"],
-  ["/next/data", "数据"],
-  ["/next/agent", "Agent"],
-  ["/next/knowledge", "知识库"],
+  ["/next", "智能竞价分析"],
+  ["/next/agent", "Agent 模型"],
   ["/next/settings", "设置"],
 ];
 
@@ -18,40 +16,56 @@ test.describe("工作台冒烟", () => {
     });
   }
 
-  test("工作区是市场对比视图", async ({ page }) => {
+  test("竞价页有货架、解读和量化指标", async ({ page }) => {
     await page.goto("/next");
-    await expect(page.getByRole("heading", { name: "市场货架" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "实时货架" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "AI 市场解读" })).toBeVisible();
     expect(await page.locator(".shelf-product").count()).toBeGreaterThan(0);
+    expect(await page.locator(".kpi").count()).toBeGreaterThanOrEqual(6);
+    await expect(page.locator(".chart-svg").first()).toBeVisible();
   });
 
-  test("工作区问答返回答案", async ({ page }) => {
+  test("竞价页可以筛选事件并看到研判", async ({ page }) => {
     await page.goto("/next");
-    await page
-      .getByPlaceholder("例如：价格带击穿的判定标准是什么？")
-      .fill("价格带击穿的判定标准是什么？");
-    await page.getByRole("button", { name: "提问" }).click();
-    await expect(page.locator(".chat-answer")).toBeVisible({ timeout: 45_000 });
+    await expect(page.locator(".event-row").first()).toBeVisible({ timeout: 15_000 });
+    await page.locator(".event-row").first().click();
+    await expect(page.getByRole("heading", { name: "AI 研判" })).toBeVisible();
   });
 
-  test("数据页覆盖商品、采集与门禁", async ({ page }) => {
-    await page.goto("/next/data");
-    await expect(page.getByRole("heading", { name: "商品与映射" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "采集与回收" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "实验与门禁" })).toBeVisible();
+  test("Agent 页覆盖轨迹、能力、知识、微调", async ({ page }) => {
+    await page.goto("/next/agent");
+    await expect(page.getByRole("heading", { name: "Agent 模型" })).toBeVisible();
+    await page.getByRole("button", { name: /能力矩阵/ }).click();
+    await expect(page.getByText("LangGraph", { exact: true }).first()).toBeVisible();
+    await page.getByRole("button", { name: /知识与案例/ }).click();
+    await expect(page.getByRole("heading", { name: "知识库" })).toBeVisible();
+    await page.getByRole("button", { name: /LoRA \/ SFT/ }).click();
+    await expect(page.getByRole("heading", { name: "训练链路" })).toBeVisible();
   });
 
-  test("知识库包含案例库", async ({ page }) => {
-    await page.goto("/next/knowledge");
-    await expect(page.getByRole("heading", { name: "案例库" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "案例检索" })).toBeVisible();
+  test("设置页覆盖接入、模型、账户", async ({ page }) => {
+    await page.goto("/next/settings");
+    await expect(page.getByRole("heading", { name: "接入模块" })).toBeVisible();
+    await expect(page.getByText("建议生产").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "模型路由" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "账号", exact: true })).toBeVisible();
+  });
+
+  test("接入服务可以生成令牌并测试推送", async ({ page }) => {
+    await page.goto("/next/settings");
+    await page.getByPlaceholder("令牌名称").fill("e2e-token");
+    await page.getByRole("button", { name: "生成令牌" }).click();
+    await expect(page.locator(".token-new code")).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "测试推送" }).click();
+    await expect(page.locator(".push-result")).toBeVisible({ timeout: 30_000 });
   });
 
   test("大屏是沉浸模式并可退出", async ({ page }) => {
     await page.goto("/next/screen");
-    await expect(page.locator(".screen.immersive")).toBeVisible();
-    await expect(page.getByRole("link", { name: "返回工作区" })).toBeVisible();
-    await expect(page.locator(".sidebar")).toHaveCount(0);
+    await expect(page.locator(".screen")).toBeVisible();
+    await expect(page.getByRole("button", { name: "返回智能竞价" })).toBeVisible();
+    await expect(page.locator(".rail")).toHaveCount(0);
+    await expect(page.locator(".shelf")).toBeVisible();
   });
 
   test("大屏可以触发评测", async ({ page }) => {
@@ -62,17 +76,10 @@ test.describe("工作台冒烟", () => {
     });
   });
 
-  test("设置页可切换模型来源与数据接入", async ({ page }) => {
-    await page.goto("/next/settings");
-    await expect(page.getByRole("heading", { name: "模型来源" })).toBeVisible();
-    await page.getByRole("button", { name: /云端 API/ }).click();
-    await expect(
-      page.getByPlaceholder("https://dashscope.aliyuncs.com/compatible-mode/v1"),
-    ).toBeVisible();
-
-    await expect(page.getByRole("heading", { name: "数据接入" })).toBeVisible();
-    await page.getByRole("button", { name: /影刃八爪鱼/ }).click();
-    await expect(page.getByPlaceholder("token")).toBeVisible();
+  test("小窗问答不占主区", async ({ page }) => {
+    await page.goto("/next");
+    await page.getByRole("button", { name: "辅助问答" }).click();
+    await expect(page.locator(".qa-body")).toBeVisible();
   });
 
   test("登录页可渲染", async ({ page }) => {
@@ -84,7 +91,9 @@ test.describe("工作台冒烟", () => {
       }),
     );
     await page.goto("/next/login");
-    await expect(page.getByRole("heading", { name: "登录工作台" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "登录" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "进入竞价控制台" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "进入控制台" })).toBeVisible();
+    await expect(page.getByPlaceholder("admin")).toBeVisible();
+    await expect(page.getByText("演示账号 · 5 个")).toHaveCount(0);
   });
 });

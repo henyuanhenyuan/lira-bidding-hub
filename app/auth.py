@@ -12,9 +12,19 @@ from fastapi import HTTPException, Request
 
 from . import config, db
 
-AUTH_ENABLED = os.getenv("LIRA_AUTH", "off") == "on"
+AUTH_ENABLED = os.getenv("LIRA_AUTH", "on") == "on"
 COOKIE = "lira_session"
 TTL_SECONDS = 12 * 3600
+
+# 演示与交付用的 5 个真实账号：启动时幂等写入，登录即用。
+DEMO_ACCOUNTS: tuple[dict[str, str], ...] = (
+    {"username": "admin", "password": "Lira@Admin2026", "role": "admin", "display_name": "林澈 · 负责人"},
+    {"username": "manager", "password": "Lira@Manager2026", "role": "manager", "display_name": "周遥 · 竞价主管"},
+    {"username": "analyst", "password": "Lira@Analyst2026", "role": "manager", "display_name": "陈粟 · 价格分析师"},
+    {"username": "operator", "password": "Lira@Ops2026", "role": "member", "display_name": "许棠 · 运营执行"},
+    {"username": "viewer", "password": "Lira@View2026", "role": "member", "display_name": "顾言 · 只读观察"},
+)
+ROLE_TEXT = {"admin": "管理员", "manager": "主管", "member": "成员"}
 
 INGEST_TOKEN = os.getenv("LIRA_INGEST_TOKEN", "")
 COOKIE_SECURE = os.getenv("LIRA_COOKIE_SECURE", "off") == "on"
@@ -77,18 +87,55 @@ def verify_token(token: str | None) -> str | None:
     return username
 
 
+def ensure_accounts(conn) -> list[str]:
+    """幂等写入 5 个交付账号；已存在则只补齐展示名，不覆盖密码与角色。"""
+    created: list[str] = []
+    for item in DEMO_ACCOUNTS:
+        row = conn.execute(
+            "SELECT username, display_name FROM app_user WHERE username = ?",
+            (item["username"],),
+        ).fetchone()
+        if row:
+            if not row["display_name"]:
+                conn.execute(
+                    "UPDATE app_user SET display_name = ? WHERE username = ?",
+                    (item["display_name"], item["username"]),
+                )
+            continue
+        conn.execute(
+            "INSERT INTO app_user (username, password_hash, role, display_name, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (
+                item["username"],
+                hash_password(item["password"]),
+                item["role"],
+                item["display_name"],
+                db.now_iso(),
+            ),
+        )
+        created.append(item["username"])
+    return created
+
+
 def ensure_default_admin(conn) -> str | None:
-    if not AUTH_ENABLED:
-        return None
-    exists = conn.execute("SELECT COUNT(*) c FROM app_user").fetchone()["c"]
-    if exists:
-        return None
-    conn.execute(
-        "INSERT INTO app_user (username, password_hash, role, created_at)"
-        " VALUES (?,?,?,?)",
-        ("admin", hash_password("admin123"), "admin", db.now_iso()),
-    )
-    return "admin"
+    created = ensure_accounts(conn)
+    return "admin" if "admin" in created else None
+
+
+def account_of(actor: str) -> dict[str, str] | None:
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT username, role, display_name FROM app_user WHERE username = ?",
+            (actor,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def display_name_of(actor: str) -> str:
+    account = account_of(actor)
+    if not account:
+        return actor
+    return account.get("display_name") or actor
 
 
 def role_of(actor: str) -> str:
@@ -131,14 +178,41 @@ def require_role(*roles: str):
     return dependency
 
 
-def bearer_matches(request: Request) -> bool:
-    """采集端用服务令牌写入，避免为了加登录而打断 RPA。"""
-    if not INGEST_TOKEN:
-        return False
+def bearer_token(request: Request) -> str | None:
     raw = request.headers.get("Authorization", "")
     if not raw.startswith("Bearer "):
+        return None
+    value = raw[7:].strip()
+    return value or None
+
+
+def token_matches(raw: str) -> bool:
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    with db.get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM api_token WHERE token_hash = ? AND revoked_at IS NULL",
+            (digest,),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE api_token SET last_used_at = ?, call_count = call_count + 1 WHERE id = ?",
+            (db.now_iso(), row["id"]),
+        )
+    return True
+
+
+def bearer_matches(request: Request) -> bool:
+    """采集端用服务令牌写入，避免为了加登录而打断 RPA。"""
+    raw = bearer_token(request)
+    if not raw:
         return False
-    return hmac.compare_digest(raw[7:], INGEST_TOKEN)
+    if INGEST_TOKEN and hmac.compare_digest(raw, INGEST_TOKEN):
+        return True
+    try:
+        return token_matches(raw)
+    except Exception:
+        return False
 
 
 def check_login_rate(key: str) -> None:

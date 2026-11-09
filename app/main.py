@@ -16,7 +16,7 @@ async def lifespan(_: FastAPI):
     settings_store.apply()
     db.init_db()
     with db.get_db() as conn:
-        auth.ensure_default_admin(conn)
+        auth.ensure_accounts(conn)
     scheduler.scheduler.start()
     try:
         yield

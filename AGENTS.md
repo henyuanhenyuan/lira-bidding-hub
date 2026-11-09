@@ -15,13 +15,19 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 cd web-next && npm install && npm run build
 ```
 
-默认入口 `/` 会重定向到 `/next`；`/legacy` 保留旧版界面一个版本。
+入口 `/next/login`，鉴权默认开启。交付账号：`admin / Lira@Admin2026`、
+`manager / Lira@Manager2026`、`analyst / Lira@Analyst2026`、
+`operator / Lira@Ops2026`、`viewer / Lira@View2026`。
+
+一级入口只有三个：`/`（智能竞价分析）、`/agent`（Agent 模型）、`/settings`（设置）；
+另有 `/screen` 沉浸大屏与 `/next/login`。界面照搬 `D:\lirav1` 设计系统（极光玻璃、顶栏 + 三段导航、Panel/KPI/seg）；唯一自定义模块是商品货架（深蓝霓虹自动贩卖机 + 彩色笑脸袋）。
 
 ## 测试
 
 ```bash
 docker compose up -d db        # 测试依赖 PostgreSQL + pgvector
-pytest -q
+pytest -q                      # 376 项
+cd web-next && npx playwright test   # 12 项；PLAYWRIGHT_PORT=8012 可避开正在运行的服务
 ```
 
 ## 评测
@@ -37,18 +43,17 @@ python scripts/eval_gate.py --tier smoke --update-baseline   # 更新基线
 
 ## 模型配置
 
-- 本地开发：Ollama（`LIRA_OLLAMA_MODEL`，默认 `qwen3:4b`；显存够可换 `qwen3:14b`）。
-- 演示 / 生产：OpenAI 兼容通道，建议 `qwen-plus`：
+- 本机 4B：Ollama（`qwen3:4b`），**只做测试与离线演示**。
+- 生产核心：一个 API 集成，默认建议 `qwen-plus`（DashScope），在设置页「模型与通道」保存；
+  API 集成写入 `settings_store.api_providers`，本地集成仍是 Ollama。
+- 路由：`openai`（API 集成）、`ollama`（本地）、`auto`（API 优先、本地兜底）。
+- 微调：`/api/finetune/*` 导出 SFT JSONL、生成 PEFT + TRL 配置并校验；训练依赖未安装不影响推理。
 
-```bash
-export LIRA_LLM_BACKEND=gateway
-export LIRA_OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-export LIRA_OPENAI_API_KEY=sk-xxx
-export LIRA_OPENAI_MODEL=qwen-plus
-```
+## 新模块
 
-`LIRA_LLM_ROUTE=auto|ollama|openai` 控制路由优先级；任一通道不可用会自动降级，
-全部不可用时回落到确定性模板（与 `LIRA_LLM=off` 行为一致）。
+- `app/routers/integration.py`：接入令牌（哈希存储）、推送/干跑、写入日志。
+- `app/routers/finetune.py` + `app/finetune.py`：LoRA / SFT 数据与配置。
+- `app/routers/settings.py`：单个 API 集成 + 本地集成的读写与真实探测。
 
 ## AI Coding 约定
 
@@ -70,6 +75,9 @@ export LIRA_OPENAI_MODEL=qwen-plus
 | `app/agent_graph.py` | LangGraph 状态机、有界 ReAct、handoff、记忆注入 |
 | `app/evaluation/` | 金标集、指标、判官、运行器、报告 |
 | `app/llm/` | 多 Provider 网关（路由 / 退避 / 熔断 / 限流 / 账本） |
+| `app/routers/integration.py` | 接入令牌、推送、写入日志 |
+| `app/finetune.py` | SFT 数据导出、PEFT/TRL 配置、校验 |
+| `web-next/src/pages/` | Bidding / AgentHub / Settings / BigScreen / Login |
 | `app/safety/` | 注入隔离与 PII 脱敏 |
 | `app/tracing.py` | span 追踪 |
 | `scripts/eval_gate.py` | 评测门禁 |

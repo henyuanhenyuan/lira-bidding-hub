@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import queue
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -14,7 +15,6 @@ from .. import (
     config, db, docs as doc_store, eval as eval_store,
     executor, gates, guardrail, ingest, metrics,
     review_queue, scheduler, skills, stream, tracing,
-    vectorstore,
 )
 from .. import llm
 from .. import outcome as outcome_store
@@ -25,6 +25,27 @@ from ..evaluation import runner as eval_runner
 from .common import _payload
 
 router = APIRouter()
+
+_VECTOR_CACHE: dict[str, Any] = {"at": 0.0, "value": None}
+
+
+def _vector_counts(conn, cases: int) -> dict[str, Any]:
+    now = time.time()
+    if _VECTOR_CACHE["value"] is not None and now - _VECTOR_CACHE["at"] < 30:
+        indexed = _VECTOR_CACHE["value"]
+    else:
+        rows = conn.execute(
+            "SELECT table_name FROM information_schema.tables"
+            " WHERE table_schema = 'public' AND table_name LIKE 'vec\\_%'"
+        ).fetchall()
+        indexed = 0
+        for row in rows:
+            count = conn.execute(
+                f'SELECT COUNT(*) c FROM "{row["table_name"]}"'
+            ).fetchone()["c"]
+            indexed += count
+        _VECTOR_CACHE.update(at=now, value=indexed)
+    return {"indexed": indexed, "cases": cases, "stale": indexed < cases}
 
 
 # ---------------- 实验（holdout） ----------------
@@ -130,16 +151,8 @@ def health() -> dict[str, Any]:
             " GROUP BY collector ORDER BY last_ts DESC"
         ).fetchall()
         freshness = collectors.freshness(conn)
+        vector_index = _vector_counts(conn, counts["cases"])
 
-    store = vectorstore.PgVectorStore()
-    indexed = sum(
-        store.count(name) for name in store.collections("case_embeddings_")
-    )
-    vector_index = {
-        "indexed": indexed,
-        "cases": counts["cases"],
-        "stale": indexed < counts["cases"],
-    }
     return {
         "ok": True,
         "counts": counts,

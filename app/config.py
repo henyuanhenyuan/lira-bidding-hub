@@ -22,6 +22,8 @@ LLM_ROUTE = os.getenv("LIRA_LLM_ROUTE", "auto")        # auto | ollama | openai
 OPENAI_BASE_URL = os.getenv("LIRA_OPENAI_BASE_URL", "")
 OPENAI_API_KEY = os.getenv("LIRA_OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("LIRA_OPENAI_MODEL", "qwen-plus")
+# 已启用且配置了 Key 的 OpenAI 兼容通道，由 settings_store.apply() 注入。
+OPENAI_PROVIDERS: list[dict] = []
 JUDGE_MODEL = os.getenv("LIRA_JUDGE_MODEL", "")
 LLM_RPM = int(os.getenv("LIRA_LLM_RPM", "60"))
 LLM_MAX_RETRIES = int(os.getenv("LIRA_LLM_MAX_RETRIES", "2"))

@@ -49,7 +49,12 @@ def login(body: LoginIn, request: Request, response: Response) -> dict[str, Any]
         httponly=True, samesite="lax", secure=auth.COOKIE_SECURE,
         max_age=auth.TTL_SECONDS,
     )
-    return {"username": body.username, "role": row["role"]}
+    return {
+        "username": body.username,
+        "role": row["role"],
+        "display_name": row["display_name"] or body.username,
+        "role_text": auth.ROLE_TEXT.get(row["role"], row["role"]),
+    }
 
 @router.post("/api/logout")
 def logout(response: Response) -> dict[str, Any]:
@@ -60,11 +65,22 @@ def logout(response: Response) -> dict[str, Any]:
 def me(request: Request) -> dict[str, Any]:
     if not auth.AUTH_ENABLED:
         actor = request.headers.get("X-Actor") or "local"
-        return {"auth": False, "actor": actor, "username": actor, "role": "admin"}
+        return {
+            "auth": False, "actor": actor, "username": actor,
+            "display_name": "本地模式", "role": "admin", "role_text": "管理员",
+        }
     username = auth.verify_token(request.cookies.get(auth.COOKIE))
     if not username:
         raise HTTPException(401, "login required")
-    return {"auth": True, "username": username, "role": auth.role_of(username)}
+    account = auth.account_of(username) or {}
+    role = account.get("role", "member")
+    return {
+        "auth": True,
+        "username": username,
+        "display_name": account.get("display_name") or username,
+        "role": role,
+        "role_text": auth.ROLE_TEXT.get(role, role),
+    }
 
 @router.get("/api/users")
 def list_users(
@@ -72,14 +88,18 @@ def list_users(
 ) -> list[dict[str, Any]]:
     with db.get_db() as conn:
         rows = conn.execute(
-            "SELECT username, role, created_at FROM app_user ORDER BY username"
+            "SELECT username, role, display_name, created_at FROM app_user ORDER BY username"
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [
+        {**dict(r), "role_text": auth.ROLE_TEXT.get(r["role"], r["role"])}
+        for r in rows
+    ]
 
 class UserIn(BaseModel):
     username: str
     password: str
     role: str = "member"
+    display_name: str | None = None
 
 class PasswordIn(BaseModel):
     new_password: str
@@ -150,9 +170,12 @@ def create_user(
         if exists:
             raise HTTPException(409, "user exists")
         conn.execute(
-            "INSERT INTO app_user (username, password_hash, role, created_at)"
-            " VALUES (?,?,?,?)",
-            (body.username, auth.hash_password(body.password), body.role, db.now_iso()),
+            "INSERT INTO app_user (username, password_hash, role, display_name, created_at)"
+            " VALUES (?,?,?,?,?)",
+            (
+                body.username, auth.hash_password(body.password), body.role,
+                body.display_name or body.username, db.now_iso(),
+            ),
         )
     return {"username": body.username, "role": body.role}
 

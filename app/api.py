@@ -19,6 +19,8 @@ from .routers import ops
 from .routers import stream
 from .routers import settings as settings_router
 from .routers import workspace
+from .routers import integration
+from .routers import finetune
 
 router = APIRouter()
 for sub in (
@@ -37,5 +39,7 @@ for sub in (
     stream.router,
     workspace.router,
     settings_router.router,
+    integration.router,
+    finetune.router,
 ):
     router.include_router(sub)

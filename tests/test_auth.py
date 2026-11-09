@@ -152,7 +152,10 @@ def test_me_returns_role(monkeypatch):
     client = TestClient(app)
     client.post("/api/login", json={"username": "boss", "password": "pw123456"})
     body = client.get("/api/me").json()
-    assert body == {"auth": True, "username": "boss", "role": "admin"}
+    assert body == {
+        "auth": True, "username": "boss", "display_name": "boss",
+        "role": "admin", "role_text": "管理员",
+    }
 
 
 def test_login_rate_limited(monkeypatch):

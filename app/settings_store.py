@@ -15,12 +15,20 @@ SETTINGS_PATH = Path(config.DATA_DIR) / "settings.json"
 
 DEFAULTS: dict[str, Any] = {
     "backend": "gateway",
-    "route": "auto",
+    "route": "ollama",
     "local_model": "qwen3:4b",
     "local_url": "http://127.0.0.1:11434",
-    "api_base_url": "",
+    "api_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "api_model": "qwen-plus",
     "api_key": "",
+    "active_provider": "qwen",
+    "api_providers": [
+        {
+            "id": "qwen", "name": "通义千问",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "model": "qwen-plus", "api_key": "", "enabled": True,
+        },
+    ],
     "taobao_app_key": "",
     "taobao_app_secret": "",
     "octoparse_token": "",
@@ -48,6 +56,41 @@ def save(values: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def providers_of(data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    rows = (data or load()).get("api_providers") or []
+    cleaned: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id") or "").strip()
+        if not pid:
+            continue
+        cleaned.append(
+            {
+                "id": pid,
+                "name": str(row.get("name") or pid),
+                "base_url": str(row.get("base_url") or "").strip(),
+                "model": str(row.get("model") or "").strip(),
+                "api_key": str(row.get("api_key") or ""),
+                "enabled": bool(row.get("enabled", True)),
+            }
+        )
+    return cleaned
+
+
+def active_provider(data: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    data = data or load()
+    providers = providers_of(data)
+    wanted = str(data.get("active_provider") or "")
+    for provider in providers:
+        if provider["id"] == wanted:
+            return provider
+    for provider in providers:
+        if provider["enabled"] and provider["api_key"]:
+            return provider
+    return providers[0] if providers else None
+
+
 def apply(values: dict[str, Any] | None = None) -> None:
     """把设置写进 config，使其在当前进程立即生效。"""
     data = values or load()
@@ -55,22 +98,57 @@ def apply(values: dict[str, Any] | None = None) -> None:
     config.LLM_ROUTE = data.get("route") or config.LLM_ROUTE
     config.OLLAMA_MODEL = data.get("local_model") or config.OLLAMA_MODEL
     config.OLLAMA_URL = data.get("local_url") or config.OLLAMA_URL
-    config.OPENAI_BASE_URL = data.get("api_base_url") or ""
-    config.OPENAI_MODEL = data.get("api_model") or config.OPENAI_MODEL
-    config.OPENAI_API_KEY = data.get("api_key") or ""
+
+    providers = providers_of(data)
+    config.OPENAI_PROVIDERS = [
+        {
+            "id": item["id"], "name": item["name"],
+            "base_url": item["base_url"], "model": item["model"],
+            "api_key": item["api_key"],
+        }
+        for item in providers
+        if item["enabled"] and item["base_url"] and item["api_key"]
+    ]
+
+    active = active_provider(data)
+    if active and active["api_key"] and active["base_url"]:
+        config.OPENAI_BASE_URL = active["base_url"]
+        config.OPENAI_MODEL = active["model"] or config.OPENAI_MODEL
+        config.OPENAI_API_KEY = active["api_key"]
+    else:
+        config.OPENAI_BASE_URL = data.get("api_base_url") or ""
+        config.OPENAI_MODEL = data.get("api_model") or config.OPENAI_MODEL
+        config.OPENAI_API_KEY = data.get("api_key") or ""
 
 
 def public_view() -> dict[str, Any]:
     data = load()
+    providers = providers_of(data)
+    active = active_provider(data)
+    api_base = (active["base_url"] if active else "") or data["api_base_url"]
+    api_model = (active["model"] if active else "") or data["api_model"]
+    api_key = bool(active and active["api_key"]) or bool(data["api_key"])
     return {
         "backend": data["backend"],
         "route": data["route"],
         "local": {"model": data["local_model"], "url": data["local_url"]},
         "api": {
-            "base_url": data["api_base_url"],
-            "model": data["api_model"],
-            "has_key": bool(data["api_key"]),
+            "base_url": api_base,
+            "model": api_model,
+            "has_key": api_key,
         },
+        "active_provider": active["id"] if active else data.get("active_provider"),
+        "providers": [
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "base_url": item["base_url"],
+                "model": item["model"],
+                "enabled": item["enabled"],
+                "has_key": bool(item["api_key"]),
+            }
+            for item in providers
+        ],
         "judge_model": config.JUDGE_MODEL,
         "sources": {
             "taobao": {

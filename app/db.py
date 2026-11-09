@@ -184,7 +184,38 @@ CREATE TABLE IF NOT EXISTS app_user (
   username TEXT PRIMARY KEY,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
+  display_name TEXT,
   created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS api_token (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT '["ingest"]',
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  call_count INTEGER NOT NULL DEFAULT 0,
+  revoked_at TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_api_token_hash ON api_token(token_hash);
+
+CREATE TABLE IF NOT EXISTS finetune_job (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  base_model TEXT NOT NULL,
+  method TEXT NOT NULL,
+  teacher TEXT,
+  dataset_path TEXT,
+  config_path TEXT,
+  samples INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft',
+  detail TEXT,
+  created_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS agent_run (
@@ -528,6 +559,7 @@ def _init_postgres() -> None:
 
 
 def _ensure_all_columns(conn) -> None:
+    _ensure_column(conn, "app_user", "display_name", "TEXT")
     _ensure_column(conn, "suggestion", "case_ids", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(conn, "suggestion", "actor", "TEXT")
     _ensure_column(conn, "event", "snapshot_id", "TEXT")

@@ -9,21 +9,22 @@ const bundled = process.env.PLAYWRIGHT_CHANNEL === "bundled";
 const channel = (process.env.PLAYWRIGHT_CHANNEL ?? "msedge") as
   | "msedge"
   | "chrome";
+const port = Number(process.env.PLAYWRIGHT_PORT ?? "8011");
 
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
   retries: 0,
   use: {
-    baseURL: "http://127.0.0.1:8011",
+    baseURL: `http://127.0.0.1:${port}`,
     headless: true,
     trace: "retain-on-failure",
     ...(bundled ? {} : { channel }),
   },
   webServer: {
-    command: "python -m uvicorn app.main:app --host 127.0.0.1 --port 8011",
+    command: `python -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
     cwd: "..",
-    url: "http://127.0.0.1:8011/api/health",
+    url: `http://127.0.0.1:${port}/api/health`,
     reuseExistingServer: true,
     timeout: 60_000,
     env: {

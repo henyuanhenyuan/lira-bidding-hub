@@ -27,9 +27,18 @@ def gateway_enabled() -> bool:
     return backend() == "gateway"
 
 
+def _api_names() -> list[str]:
+    return [f"api:{item['id']}" for item in getattr(config, "OPENAI_PROVIDERS", [])]
+
+
 def _build_providers() -> dict:
     providers: dict = {}
-    if config.OPENAI_BASE_URL and config.OPENAI_API_KEY:
+    for item in getattr(config, "OPENAI_PROVIDERS", []):
+        providers[f"api:{item['id']}"] = OpenAICompatProvider(
+            item["base_url"], item["api_key"], item["model"],
+            timeout=config.LLM_TIMEOUT_S,
+        )
+    if not providers and config.OPENAI_BASE_URL and config.OPENAI_API_KEY:
         providers["openai"] = OpenAICompatProvider(
             config.OPENAI_BASE_URL, config.OPENAI_API_KEY, config.OPENAI_MODEL,
             timeout=config.LLM_TIMEOUT_S,
@@ -41,13 +50,25 @@ def _build_providers() -> dict:
 
 
 def _chains(names: Sequence[str]) -> dict[str, list[str]]:
-    order = list(names)
-    if config.LLM_ROUTE == "openai":
-        order = ["openai"]
-    elif config.LLM_ROUTE == "ollama":
+    api = _api_names()
+    route = config.LLM_ROUTE
+    provider_ids = {item["id"] for item in getattr(config, "OPENAI_PROVIDERS", [])}
+    if route == "ollama":
         order = ["ollama"]
-    elif not config.OPENAI_BASE_URL:
+    elif route.startswith("api:") and route in api:
+        order = [route]
+    elif route in provider_ids:
+        order = [f"api:{route}"]
+    elif route == "openai":
+        order = api or (
+            ["openai"] if config.OPENAI_BASE_URL and config.OPENAI_API_KEY else ["ollama"]
+        )
+    elif route == "auto":
+        order = api + ["ollama"]
+    elif not api and not config.OPENAI_BASE_URL:
         order = ["ollama"]
+    else:
+        order = list(names) or api + ["ollama"]
     return {
         "default": order, "analysis": order,
         "critic": order, "judge": order, "review_summary": order,

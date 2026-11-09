@@ -1,137 +1,161 @@
-import { NavLink } from "react-router-dom";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
-import { useAuth } from "../core/auth";
-
-export function Page({
-  title,
-  desc,
-  actions,
-  children,
-}: {
-  title: string;
-  desc?: string;
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <>
-      <header className="page-head">
-        <div>
-          <h1>{title}</h1>
-          {desc && <p className="page-desc">{desc}</p>}
-        </div>
-        {actions && <div className="page-actions">{actions}</div>}
-      </header>
-      {children}
-    </>
-  );
-}
-
-export function Card({
+export function Panel({
   title,
   sub,
-  extra,
-  flush,
+  right,
   children,
+  className = "",
+  flush = false,
+  fill = false,
 }: {
-  title?: string;
-  sub?: string;
-  extra?: ReactNode;
-  flush?: boolean;
+  title?: ReactNode;
+  sub?: ReactNode;
+  right?: ReactNode;
   children: ReactNode;
+  className?: string;
+  flush?: boolean;
+  fill?: boolean;
 }) {
   return (
-    <section className="card">
-      {(title || extra) && (
-        <div className="card-head">
-          {title && <h2>{title}</h2>}
-          {sub && <span className="card-sub">{sub}</span>}
-          {extra && <div className="card-extra">{extra}</div>}
-        </div>
+    <section className={`glass tilt ${flush ? "flush" : ""} ${fill ? "panel-fill" : ""} ${className}`}>
+      {(title || right) && (
+        <header className="row between wrap gap-10 pad panel-head" style={{ paddingBottom: 12 }}>
+          <div className="stack">
+            {sub && <span className="eyebrow">{sub}</span>}
+            {title && <h3 className="h3">{title}</h3>}
+          </div>
+          {right}
+        </header>
       )}
-      <div className={`card-body${flush ? " flush" : ""}`}>{children}</div>
+      <div className={flush ? "panel-body" : "pad panel-body"} style={flush ? undefined : { paddingTop: 0 }}>
+        {children}
+      </div>
     </section>
   );
 }
 
-export function Stat({
-  label,
-  value,
-  hint,
-  tone,
+export function Sparkline({
+  values,
+  width = 140,
+  height = 34,
+  tone = "cyan",
 }: {
-  label: string;
-  value: ReactNode;
-  hint?: string;
-  tone?: "ok" | "warn" | "danger";
+  values: number[];
+  width?: number;
+  height?: number;
+  tone?: "cyan" | "violet" | "mint" | "rose";
+}) {
+  const clean = values.filter((v) => v !== null && !Number.isNaN(v));
+  if (clean.length < 2) return <div className="spark" style={{ height }} />;
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+  const span = max - min || 1;
+  const step = width / (clean.length - 1);
+  const pts = clean.map((v, i) => [i * step, height - ((v - min) / span) * (height - 4) - 2]);
+  const line = pts.map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const area = `${line} L${width},${height} L0,${height} Z`;
+  const id = `sg-${tone}-${Math.round(width)}-${clean.length}`;
+  const colors: Record<string, string> = {
+    cyan: "#5be1ff",
+    violet: "#9b7bff",
+    mint: "#4ef2c0",
+    rose: "#ff7a9c",
+  };
+  const stroke = colors[tone] ?? colors.cyan;
+  return (
+    <svg className="spark" viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.34" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${id})`} />
+      <path d={line} fill="none" stroke={stroke} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" opacity="0.95" />
+    </svg>
+  );
+}
+
+export function Delta({ value, inverted = false }: { value: number; inverted?: boolean }) {
+  if (!Number.isFinite(value)) return <span className="delta flat">—</span>;
+  if (Math.abs(value) < 0.0005) return <span className="delta flat">持平</span>;
+  const good = inverted ? value < 0 : value > 0;
+  return (
+    <span className={`delta ${good ? "up" : "down"}`}>
+      {value > 0 ? "▲" : "▼"} {Math.abs(value * 100).toFixed(1)}%
+    </span>
+  );
+}
+
+export function Seg<T extends string>({
+  value,
+  items,
+  onChange,
+}: {
+  value: T;
+  items: { key: T; label: string; sub?: string }[];
+  onChange: (key: T) => void;
 }) {
   return (
-    <div className={`stat${tone ? ` tone-${tone}` : ""}`}>
-      <div className="stat-label">{label}</div>
-      <div className="stat-value">{value}</div>
-      {hint && <div className="stat-hint">{hint}</div>}
+    <div className="seg">
+      {items.map((item) => (
+        <button key={item.key} className={value === item.key ? "on" : ""} onClick={() => onChange(item.key)}>
+          {item.label}
+          {item.sub && <span className="seg-sub">{item.sub}</span>}
+        </button>
+      ))}
     </div>
   );
 }
 
-export function Badge({
-  tone = "neutral",
-  children,
-}: {
-  tone?: "neutral" | "ok" | "warn" | "danger" | "accent";
-  children: ReactNode;
-}) {
-  return <span className={`badge ${tone}`}>{children}</span>;
+export function Loading({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="stack gap-10">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="skeleton" style={{ height: 44, opacity: 1 - i * 0.18 }} />
+      ))}
+    </div>
+  );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <div className="empty">{children}</div>;
-}
-
-export function Spinner({ label = "加载中…" }: { label?: string }) {
-  return <div className="loader">{label}</div>;
+export function Empty({ text = "暂无数据" }: { text?: string }) {
+  return (
+    <div className="muted" style={{ padding: "22px 0", textAlign: "center", fontSize: 13 }}>
+      {text}
+    </div>
+  );
 }
 
 export function ErrorBox({ message }: { message: string }) {
-  return <div className="error-box">{message}</div>;
-}
-
-export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="field">
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-
-export function Table({
-  head,
-  children,
-}: {
-  head: ReactNode[];
-  children: ReactNode;
-}) {
-  return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            {head.map((item, index) => (
-              <th key={index}>{item}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
+    <div className="badge rose" style={{ whiteSpace: "normal", padding: "10px 12px", display: "block" }}>
+      {message}
     </div>
   );
 }
 
-export function SeverityBadge({ value }: { value: string }) {
-  const tone = value === "L3" ? "danger" : value === "L2" ? "warn" : "neutral";
-  return <Badge tone={tone}>{value}</Badge>;
+export function CopyButton({ text, label = "复制" }: { text: string; label?: string }) {
+  const [done, setDone] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const area = document.createElement("textarea");
+      area.value = text;
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+    }
+    setDone(true);
+    window.setTimeout(() => setDone(false), 1500);
+  }
+  return (
+    <button type="button" className="btn sm ghost" onClick={() => void copy()}>
+      {done ? "已复制" : label}
+    </button>
+  );
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -141,22 +165,32 @@ const STATUS_TEXT: Record<string, string> = {
   executed: "已执行",
   rejected: "已驳回",
   cancelled: "已取消",
+  accepted: "已采纳",
   holdout: "观察组",
   running: "运行中",
   succeeded: "成功",
   failed: "失败",
+  ok: "正常",
+  confirmed: "已确认",
+  invalid: "未通过",
+  validated: "已校验",
 };
 
 export function StatusBadge({ value }: { value: string }) {
   const tone =
-    value === "executed" || value === "succeeded"
-      ? "ok"
-      : value === "failed" || value === "rejected"
-        ? "danger"
+    value === "executed" || value === "succeeded" || value === "approved" || value === "accepted" || value === "confirmed" || value === "validated"
+      ? "mint"
+      : value === "failed" || value === "rejected" || value === "cancelled" || value === "invalid"
+        ? "rose"
         : value === "submitted" || value === "running"
-          ? "accent"
-          : "neutral";
-  return <Badge tone={tone}>{STATUS_TEXT[value] ?? value}</Badge>;
+          ? "cyan"
+          : "";
+  return <span className={`badge ${tone}`}>{STATUS_TEXT[value] ?? value}</span>;
+}
+
+export function SeverityBadge({ value }: { value: string }) {
+  const tone = value === "L3" ? "rose" : value === "L2" ? "amber" : "cyan";
+  return <span className={`badge ${tone}`}>{value}</span>;
 }
 
 const ACTION_TEXT: Record<string, string> = {
@@ -166,88 +200,27 @@ const ACTION_TEXT: Record<string, string> = {
   join_promo: "报名活动",
   no_action: "不动作",
 };
+export const actionText = (action: string) => ACTION_TEXT[action] ?? action;
 
-export function actionText(action: string): string {
-  return ACTION_TEXT[action] ?? action;
-}
+const EVENT_TEXT: Record<string, string> = {
+  price_drop: "价格下降",
+  price_rise: "价格上涨",
+  price_up: "价格上涨",
+  price_down: "价格下降",
+  band_breach: "击穿价格带",
+  coupon_change: "券面变化",
+  promotion_change: "活动变化",
+  stock_signal: "库存信号",
+  stock_change: "库存变化",
+  title_change: "标题变化",
+  image_change: "主图变化",
+  data_gap: "数据缺口",
+  low_confidence: "低置信",
+};
+export const eventText = (type: string) => EVENT_TEXT[type] ?? type;
 
-export function Shell({
-  children,
-  pending,
-}: {
-  children: ReactNode;
-  pending?: number;
-}) {
-  const { me, logout } = useAuth();
-  const roleText =
-    me?.role === "admin" ? "管理员" : me?.role === "manager" ? "主管" : me ? "成员" : "未登录";
-
-  const groups: { group: string; items: { to: string; label: string }[] }[] = [
-    {
-      group: "主线",
-      items: [
-        { to: "/", label: "工作区" },
-        { to: "/data", label: "数据" },
-      ],
-    },
-    {
-      group: "能力",
-      items: [
-        { to: "/agent", label: "Agent" },
-        { to: "/knowledge", label: "知识库" },
-      ],
-    },
-    {
-      group: "系统",
-      items: [{ to: "/settings", label: "设置" }],
-    },
-  ];
-
-  return (
-    <div className="shell">
-      <div className="bg" aria-hidden="true">
-        <span className="grid" />
-        <span className="orb orb-a" />
-        <span className="orb orb-b" />
-        <span className="orb orb-c" />
-      </div>
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">L</div>
-        </div>
-        <nav className="nav">
-          {groups.map((group) => (
-            <div className="nav-group" key={group.group}>
-              <span className="nav-label">{group.group}</span>
-              {group.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
-                >
-                  <i className="dot" />
-                  {item.label}
-                  {item.to === "/" && (pending ?? 0) > 0 && (
-                    <span className="nav-badge">{pending}</span>
-                  )}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-        <div className="sidebar-foot">
-          <div className="avatar">{(me?.username ?? "L").slice(0, 1).toUpperCase()}</div>
-          <div className="who">
-            <b>{me?.username ?? "local"}</b>
-            <span>{me?.auth ? roleText : `${roleText} · 本地模式`}</span>
-          </div>
-          <button className="icon-btn" title="退出登录" onClick={() => void logout()}>
-            ⎋
-          </button>
-        </div>
-      </aside>
-      <main className="main">{children}</main>
-    </div>
-  );
-}
+export const ROLE_TEXT: Record<string, string> = {
+  admin: "管理员",
+  manager: "主管",
+  member: "成员",
+};
