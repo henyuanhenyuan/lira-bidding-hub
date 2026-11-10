@@ -20,6 +20,9 @@ cd web-next && npm install && npm run build   # 产物由后端在 /next 提供
 `manager / Lira@Manager2026`、`analyst / Lira@Analyst2026`、
 `operator / Lira@Ops2026`、`viewer / Lira@View2026`。
 
+本机直跑默认 `LIRA_AUTH=on`、`LIRA_SCHEDULER=thread`；`docker compose` 编排预置
+`LIRA_AUTH=off` + Celery/Redis，需要时显式覆盖环境变量。
+
 ## 界面结构
 
 毛玻璃控制台，路由全部挂在 `/next` 下：`/`（调度中枢）、`/bidding`（竞价台）、
@@ -40,11 +43,22 @@ pytest -q                      # 383 项
 ## 评测
 
 ```bash
-python scripts/gen_golden_cases.py             # 重新生成金标（120 条）
+python scripts/gen_golden_cases.py             # 重新生成金标
 python scripts/eval_gate.py --tier smoke       # PR 门禁
+python scripts/eval_gate.py --tier core        # 核心集
 python scripts/eval_gate.py --tier full        # 全量，产出 Markdown 报告
 python scripts/eval_gate.py --tier smoke --update-baseline   # 更新基线
 ```
+
+## 微调
+
+数据、配置、训练全部走 PEFT + TRL，流程与产物见 README「微调（LoRA）」。当前线上
+本地模型为 `lira-bid:v1`（Qwen3-4B + 77 条样本 LoRA，q8_0 GGUF），在设置页切换。
+
+## 文档
+
+`README.md` 面向使用者（运行、页面、接口、微调），`HANDOFF.md` 记录当前运行态与已知限制，
+本文件约定协作流程。改代码或运行态变化时同步这几份文档，避免口径过期。
 
 ## 约定
 

@@ -35,6 +35,9 @@ cd web-next && npm install && npm run build
 
 打开 http://127.0.0.1:8011/next/login 。前端开发模式：`cd web-next && npm run dev`（5173 代理到 8011）。
 
+本机直跑默认 `LIRA_AUTH=on`、`LIRA_SCHEDULER=thread`；`docker compose` 编排预置
+`LIRA_AUTH=off` + Celery/Redis，按需改环境变量即可。
+
 ## 微调（LoRA）
 
 数据、配置、训练全部走 PEFT + TRL，不自研训练框架：
@@ -45,8 +48,10 @@ curl -X POST http://127.0.0.1:8011/api/finetune/jobs -d '{"name":"竞价策略 L
 python data/finetune/train_lora.py --config data/finetune/config-<job_id>.json
 ```
 
-8GB 显卡装不下 4B 全量权重（bitsandbytes 无 Windows 轮子），config 里设 `"device": "cpu"`
-即可在 32G 内存上训练：77 条样本 1 epoch ≈ 30 分钟，产出 `data/finetune/lora-out/adapter_model.safetensors`。
+本机 8GB 显卡通过 `max_gpu_memory: 7GiB` 完成了 77 条样本 1 epoch 的训练
+（20 步，约 30 分钟，train_loss 1.38），产出
+`data/finetune/lora-out/adapter_model.safetensors`。显存不足时可把 `"device"` 设为
+`"cpu"`，在 32G 内存上跑同一条链路；Windows 下没有 bitsandbytes 轮子，QLoRA 需 Linux。
 
 ### 合并并接入推理
 
@@ -100,12 +105,27 @@ POST /api/autopilot/exceptions/{id}/resolve
 GET  /api/stream                   SSE 实时事件（agent / autopilot / event / approval）
 GET  /api/observability/traces     追踪列表与详情
 POST /api/settings/models          本地 / 云端通道切换
+POST /api/agent/chat               单目标即时研判
+GET  /api/agent/runs/{run_id}      研判运行与逐步轨迹
+POST /api/finetune/dataset         生成 SFT 数据集
+POST /api/finetune/jobs            创建 LoRA 微调任务
+POST /api/ops/run                  手动触发备份 / 重索引等运维任务
+POST /v1/ingest/validate           采集数据校验
 ```
 
 采集端可用 Bearer 令牌写入 `/v1/ingest/snapshots`，不影响人工登录。
 
+## 评测
+
+```bash
+python scripts/gen_golden_cases.py             # 生成金标用例
+python scripts/eval_gate.py --tier smoke       # PR 门禁
+python scripts/eval_gate.py --tier full        # 全量并产出 Markdown 报告
+```
+
 ## 测试
 
 ```bash
-pytest -q
+docker compose up -d db        # 测试依赖 PostgreSQL + pgvector
+pytest -q                      # 383 项
 ```
