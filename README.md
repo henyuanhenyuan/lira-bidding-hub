@@ -48,10 +48,8 @@ curl -X POST http://127.0.0.1:8011/api/finetune/jobs -d '{"name":"竞价策略 L
 python data/finetune/train_lora.py --config data/finetune/config-<job_id>.json
 ```
 
-本机 8GB 显卡通过 `max_gpu_memory: 7GiB` 完成了 77 条样本 1 epoch 的训练
-（20 步，约 30 分钟，train_loss 1.38），产出
-`data/finetune/lora-out/adapter_model.safetensors`。显存不足时可把 `"device"` 设为
-`"cpu"`，在 32G 内存上跑同一条链路；Windows 下没有 bitsandbytes 轮子，QLoRA 需 Linux。
+训练参数（显存上限、batch、epoch）由 `config-<job_id>.json` 统一配置，可按可用硬件调整；
+产出 adapter 位于 `data/finetune/lora-out/adapter_model.safetensors`。
 
 ### 合并并接入推理
 
@@ -64,7 +62,7 @@ python data/llama.cpp/convert_hf_to_gguf.py data/models/Qwen3-4B-lora-merged \
   --outfile data/models/qwen3-4b-lora-q8.gguf --outtype q8_0
 
 # 3. 注册进 Ollama（0.40 已移除 ADAPTER，必须先合并权重）
-printf 'FROM D:/MS/data/models/qwen3-4b-lora-q8.gguf\n' > data/finetune/Modelfile.q8
+printf 'FROM data/models/qwen3-4b-lora-q8.gguf\n' > data/finetune/Modelfile.q8
 ollama create lira-bid:v1 -f data/finetune/Modelfile.q8
 
 # 4. 切成默认本地模型
@@ -77,10 +75,6 @@ curl -X POST http://127.0.0.1:8011/api/settings/models \
 
 | 账号 | 密码 | 角色 |
 | --- | --- | --- |
-| admin | `Lira@Admin2026` | 负责人 |
-| manager | `Lira@Manager2026` | 竞价主管 |
-| analyst | `Lira@Analyst2026` | 价格分析师 |
-| operator | `Lira@Ops2026` | 运营执行 |
 | viewer | `Lira@View2026` | 只读观察 |
 
 ## 主要页面
