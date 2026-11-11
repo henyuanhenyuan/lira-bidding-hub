@@ -16,9 +16,7 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8011
 cd web-next && npm install && npm run build   # 产物由后端在 /next 提供
 ```
 
-入口 `/next/login`，鉴权默认开启。交付账号：`admin / Lira@Admin2026`、
-`manager / Lira@Manager2026`、`analyst / Lira@Analyst2026`、
-`operator / Lira@Ops2026`、`viewer / Lira@View2026`。
+入口 `/next/login`，鉴权默认开启。交付账号：`viewer / Lira@View2026`。
 
 本机直跑默认 `LIRA_AUTH=on`、`LIRA_SCHEDULER=thread`；`docker compose` 编排预置
 `LIRA_AUTH=off` + Celery/Redis，需要时显式覆盖环境变量。
