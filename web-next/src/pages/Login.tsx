@@ -65,7 +65,6 @@ export default function Login() {
 
       <div className="glass login-card">
         <h2>进入控制台</h2>
-        <p className="sub">五人小租户 · B 端部署</p>
 
         <form
           className="login-form"

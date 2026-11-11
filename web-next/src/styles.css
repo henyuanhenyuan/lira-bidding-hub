@@ -1675,10 +1675,6 @@ input[type="range"].input:focus {
 .login-card h2 {
   font-size: 20px;
   font-weight: 620;
-}
-.login-card .sub {
-  font-size: 12.5px;
-  color: var(--muted);
   margin-bottom: 22px;
 }
 .login-form {
