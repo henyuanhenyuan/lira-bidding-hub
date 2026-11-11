@@ -16,13 +16,18 @@ AUTH_ENABLED = os.getenv("LIRA_AUTH", "on") == "on"
 COOKIE = "lira_session"
 TTL_SECONDS = 12 * 3600
 
-# 演示与交付用的 5 个真实账号：启动时幂等写入，登录即用。
+def _seed_password(username: str, default: str) -> str:
+    return os.getenv(f"LIRA_SEED_{username.upper()}_PASSWORD", default)
+
+
+# 演示与交付用的 5 个账号：启动时幂等写入，登录即用。
+# 密码可用 LIRA_SEED_<USERNAME>_PASSWORD 覆盖，部署时请务必替换默认值。
 DEMO_ACCOUNTS: tuple[dict[str, str], ...] = (
-    {"username": "admin", "password": "Lira@Admin2026", "role": "admin", "display_name": "林澈 · 负责人"},
-    {"username": "manager", "password": "Lira@Manager2026", "role": "manager", "display_name": "周遥 · 竞价主管"},
-    {"username": "analyst", "password": "Lira@Analyst2026", "role": "manager", "display_name": "陈粟 · 价格分析师"},
-    {"username": "operator", "password": "Lira@Ops2026", "role": "member", "display_name": "许棠 · 运营执行"},
-    {"username": "viewer", "password": "Lira@View2026", "role": "member", "display_name": "顾言 · 只读观察"},
+    {"username": "admin", "password": _seed_password("admin", "Lira@Admin2026"), "role": "admin", "display_name": "林澈 · 负责人"},
+    {"username": "manager", "password": _seed_password("manager", "Lira@Manager2026"), "role": "manager", "display_name": "周遥 · 竞价主管"},
+    {"username": "analyst", "password": _seed_password("analyst", "Lira@Analyst2026"), "role": "manager", "display_name": "陈粟 · 价格分析师"},
+    {"username": "operator", "password": _seed_password("operator", "Lira@Ops2026"), "role": "member", "display_name": "许棠 · 运营执行"},
+    {"username": "viewer", "password": _seed_password("viewer", "Lira@View2026"), "role": "member", "display_name": "顾言 · 只读观察"},
 )
 ROLE_TEXT = {"admin": "管理员", "manager": "主管", "member": "成员"}
 

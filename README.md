@@ -123,3 +123,7 @@ python scripts/eval_gate.py --tier full        # 全量并产出 Markdown 报告
 docker compose up -d db        # 测试依赖 PostgreSQL + pgvector
 pytest -q                      # 383 项
 ```
+
+## 许可
+
+[MIT](LICENSE)
